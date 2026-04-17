@@ -107,12 +107,13 @@ def lookup(
         return None
 
     names = [w["name"] for w in wines]
-    result = process.extractOne(wine_name, names, scorer=fuzz.WRatio, score_cutoff=60)
+    result = process.extractOne(wine_name, names, scorer=fuzz.WRatio, score_cutoff=75)
     if result is None:
         log.debug("No fuzzy match for '%s' among %s's wines", wine_name, producer)
         return None
 
-    matched_name, _score, idx = result
+    matched_name, score, idx = result
+    log.debug("Vivino match '%s' → '%s' (score=%d)", wine_name, matched_name, score)
     w = wines[idx]
     stats = w.get("statistics", {})
     wine_id = w["id"]
