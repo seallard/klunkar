@@ -108,6 +108,9 @@ def _handle_update(update: dict, conn) -> None:
 
 
 def run() -> None:
+    import os
+    log.info("ENV DUMP: %s", {k: v for k, v in os.environ.items() if "TOKEN" not in k and "PASSWORD" not in k and "URL" not in k})
+    log.info("TOKEN set: %s, DB set: %s", bool(config.TELEGRAM_BOT_TOKEN), bool(config.DATABASE_URL))
     if not config.TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
