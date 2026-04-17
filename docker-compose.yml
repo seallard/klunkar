@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: klunkar
+      POSTGRES_USER: klunkar
+      POSTGRES_PASSWORD: klunkar
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U klunkar"]
+      interval: 2s
+      retries: 10
+
+  klunkar:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://klunkar:klunkar@db/klunkar
+    depends_on:
+      db:
+        condition: service_healthy
