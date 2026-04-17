@@ -109,6 +109,36 @@ def fetch_release_products(
     return products
 
 
+def fetch_upcoming_release_dates(
+    from_date: date,
+    to_date: date,
+    apim_key: str,
+    client: httpx.Client,
+) -> list[date]:
+    params = {
+        "productLaunch.min": from_date.isoformat(),
+        "productLaunch.max": to_date.isoformat(),
+        "assortmentText": "Tillfälligt sortiment",
+        "categoryLevel1": "Vin",
+        "page": 1,
+    }
+    dates: set[date] = set()
+    total_pages = 1
+    while params["page"] <= total_pages:
+        r = client.get(_SEARCH_URL, params=params, headers=_headers(apim_key))
+        if r.status_code == 401:
+            raise PermissionError("APIM key rejected (401)")
+        r.raise_for_status()
+        data = r.json()
+        total_pages = data.get("metadata", {}).get("totalPages", 1)
+        for p in data.get("products", []):
+            launch = p.get("productLaunch")
+            if launch:
+                dates.add(date.fromisoformat(launch[:10]))
+        params["page"] += 1
+    return sorted(dates)
+
+
 def has_release(release_date: date, apim_key: str, client: httpx.Client) -> bool:
     date_str = release_date.isoformat()
     params = {

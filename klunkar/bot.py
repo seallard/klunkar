@@ -1,10 +1,11 @@
 import logging
 import time
+from datetime import date, timedelta
 
 import httpx
 
-from klunkar import config, db
-from klunkar.release import RankedWine, format_message
+from klunkar import config, db, systembolaget
+from klunkar.release import RankedWine, _escape, _resolve_apim_key, _sv_date, format_message
 from klunkar.telegram import send_message
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
     return r.json().get("result", [])
 
 
-def _handle_update(update: dict, conn) -> None:
+def _handle_update(update: dict, conn, client: httpx.Client) -> None:
     msg = update.get("message", {})
     text = msg.get("text", "")
     chat_id = msg.get("chat", {}).get("id")
@@ -89,12 +90,33 @@ def _handle_update(update: dict, conn) -> None:
             send_message(chat_id, format_message(wines, release_date, max_price=max_price))
         log.info("/budget from %d", chat_id)
 
+    elif text.startswith("/releases"):
+        today = date.today()
+        try:
+            key = _resolve_apim_key(conn, client)
+            dates = systembolaget.fetch_upcoming_release_dates(
+                today, today + timedelta(days=90), key, client
+            )
+        except Exception as e:
+            log.error("Failed to fetch release dates: %s", e)
+            send_message(chat_id, "Kunde inte hämta kommande släpp just nu\\.")
+            return
+        if not dates:
+            send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
+        else:
+            lines = ["*Kommande släpp:*", ""]
+            for d in dates:
+                lines.append(f"• {_escape(_sv_date(d))}")
+            send_message(chat_id, "\n".join(lines))
+        log.info("/releases from %d", chat_id)
+
     elif text.startswith("/help"):
         send_message(
             chat_id,
             "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets tillfälliga sortiment\\.\n\n"
             "*/start* — prenumerera\n"
             "*/stop* — avsluta\n"
+            "*/releases* — kommande släpp\n"
             "*/budget 150* — visa viner under 150 kr\n"
             "*/budget* — ta bort budgetfilter",
         )
@@ -131,7 +153,7 @@ def run() -> None:
 
                 for update in updates:
                     try:
-                        _handle_update(update, conn)
+                        _handle_update(update, conn, client)
                     except Exception as e:
                         log.error("Error handling update %s: %s", update.get("update_id"), e)
                     offset = update["update_id"] + 1
