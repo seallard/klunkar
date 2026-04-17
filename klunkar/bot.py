@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 _POLL_TIMEOUT = 30
 _WELCOME = (
     "🍷 *Välkommen till Klunkar\\!*\n\n"
-    "Dagen innan varje tillfälligt sortiment på Systembolaget får du de tio "
+    "Dagen innan varje släpp av tillfälligt sortiment på Systembolaget får du de tio "
     "bäst betygsatta vinerna enligt Vivino\\.\n\n"
     "Använd /budget för att filtrera på maxpris, t\\.ex\\. /budget 150\\."
 )
