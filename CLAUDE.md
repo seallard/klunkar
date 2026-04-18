@@ -6,10 +6,10 @@ Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcomi
 
 One Python package, one CLI (`klunkar`), **two processes** running from the same codebase:
 
-- **`klunkar bot`** — long-running. Telegram **long polling** (not webhooks — no HTTPS needed). Handles `/start`, `/stop`.
-- **`klunkar check-release`** — one-shot, run daily by cron. If a release is tomorrow: fetch products, score via Vivino, rank, fan out to every subscriber.
+- **`klunkar bot`** — long-running Telegram **long polling** (not webhooks). Handles `/start`, `/stop`.
+- **`klunkar check-release`** — one-shot, run daily by cron. Prefetches and caches upcoming releases, then fans out to subscribers.
 
-No HTTP API. Telegram is the user interface.
+All commands read exclusively from the DB. Only `check-release` makes external HTTP requests.
 
 ## Package layout
 
@@ -32,7 +32,7 @@ klunkar/
 - **Managed Postgres** add-on, shared by both
 - Secrets via Railway env vars
 
-Deploy with `git push`. Both services run the same CLI; only the start command differs.
+Deploy with `git push`.
 
 Decided, do not re-litigate:
 - Railway
@@ -43,7 +43,7 @@ Decided, do not re-litigate:
 
 - `klunkar bot` — service entrypoint
 - `klunkar check-release` — cron entrypoint
-- `klunkar preview [DATE]` — dry run, print the ranked list, send nothing
+- `klunkar preview [DATE]` — print ranked list from DB cache
 - `klunkar subscribers list` — ops
 
 ## Config (env)
@@ -57,59 +57,35 @@ Decided, do not re-litigate:
 
 - **Idempotency**: `check-release` records notified releases in `seen_releases`; re-running the same day must not double-send.
 - **Partial failures**: one wine's Vivino lookup failing must not drop the whole batch — log and continue.
-- **No persistent Vivino cache yet** — per-run in-memory only.
+- **No persistent Vivino cache** — per-run in-memory only.
 
 ## Systembolaget integration
 
-No official API. We use the same endpoint systembolaget.se itself calls:
-
-- `GET https://api-extern.systembolaget.se/sb-api-ecommerce/v1/productsearch/search`
-- Header: `Ocp-Apim-Subscription-Key: <key>`
-- Filter params for our use case: `productLaunchDate.min`, `productLaunchDate.max` (both `YYYY-MM-DD`), `assortmentText=Tillfälligt sortiment`, `categoryLevel1=Vin`
-- Pagination: 30/page via `page=N`; use `metadata.totalPages`
-- The frontend URL names (`saljstart-fran`, etc.) are silently ignored — use the API names above
+- Endpoint: `GET https://api-extern.systembolaget.se/sb-api-ecommerce/v1/productsearch/search`
+- Auth header: `Ocp-Apim-Subscription-Key: <key>`
+- Filters for tillfälligt sortiment wine: `assortmentText=Tillfälligt sortiment`, `categoryLevel1=Vin`
+- The `productLaunchDate.min/max` params are silently ignored by the API — date filtering is done client-side on the `productLaunchDate` field of each returned product.
 
 ### The APIM key
 
-The key is a `NEXT_PUBLIC_API_KEY_APIM` value embedded in systembolaget.se's public JS bundle. It's client-side-public but rotatable.
+The key is `NEXT_PUBLIC_API_KEY_APIM` embedded in Systembolaget's public JS bundle — client-side public but rotatable.
 
-- **Bootstrap**: scrape the key on first run and cache it (env var or DB row).
-- **On 401**: re-scrape from a fresh JS bundle. Extraction: fetch any product-listing page, download the referenced `/_next/static/chunks/*.js` files, grep for 32-hex strings near `Ocp-Apim-Subscription-Key`.
-- Known-good key as of 2026-04-17: `8d39a7340ee7439f8b4c1e995c8f3e4a` (reference only — prefer runtime scraping).
+- **Bootstrap**: scrape on first run, cache in DB.
+- **On 401**: re-scrape from a fresh JS bundle. Fetch any product-listing page, download `/_next/static/chunks/*.js` files, find the 32-hex string near `Ocp-Apim-Subscription-Key`.
+- Known-good key as of 2026-04-17: `8d39a7340ee7439f8b4c1e995c8f3e4a`
 
 ### Release detection
 
-We do **not** try to discover the next upcoming release date. `check-release` runs daily and asks: *"is there a release tomorrow?"*
-
-```
-productLaunchDate.min = tomorrow
-productLaunchDate.max = tomorrow
-assortmentText    = Tillfälligt sortiment
-categoryLevel1    = Vin
-```
-
-If `metadata.docCount > 0` → fetch all pages, score via Vivino, rank, notify. Otherwise exit quietly. `check-release` checks both today and tomorrow on each run; `seen_releases` ensures no double-sends.
+`scrape_release_dates` scrapes the official calendar page for tillfälligt sortiment dates only (anchored on `/sortiment/tillfalligt-sortiment/` hrefs). `check-release` checks both today and tomorrow on each run; `seen_releases` ensures no double-sends.
 
 ## Vivino integration
 
-No official API. Two-step lookup against the unofficial internal API:
+Two-step lookup against the unofficial internal API:
 
-**Step 1 — get winery wines:**
-```
-GET https://www.vivino.com/api/wineries/<seo_name>/wines
-```
-- `seo_name` = producer name lowercased, spaces→hyphens (e.g. `cloudy-bay`)
-- Returns `wines[]` each with `id`, `name`, `statistics.ratings_average`, `statistics.ratings_count`
-- No auth required; plain `User-Agent` header sufficient
+1. `GET https://www.vivino.com/api/wineries/<seo_name>/wines` — returns wines with ratings
+2. Fuzzy-match Systembolaget's wine name against returned names
 
-**Step 2 — match wine by name:**
-- Fuzzy-match Systembolaget's wine name against returned `name` fields
-- Pick the best match; use its `statistics.ratings_average` as the score
-
-**Why not the explore endpoint:**
-- `GET /api/explore/explore` exists and returns ratings, but its `search_term` parameter is silently ignored — it only respects faceted filters (`country_codes[]`, `wine_type_ids[]`, etc.), making it useless for name-based lookup.
-
-**SEO name normalisation edge cases:** strip accents, drop punctuation (`Château` → `chateau`), handle multi-word names with hyphens.
+**Why not the explore endpoint:** `GET /api/explore/explore` silently ignores `search_term` — it only respects faceted filters, making it useless for name-based lookup.
 
 ## Ranking
 
@@ -117,18 +93,8 @@ Bayesian average — avoids a 3-rating 4.9 beating a 900-rating 4.3:
 
     score = (v / (v + m)) * R + (m / (v + m)) * C
 
-- `R` = wine's `ratings_average`
-- `v` = wine's `ratings_count`
-- `m` = prior weight (default `50`; tune if the release's count distribution calls for it)
-- `C` = mean `ratings_average` across the wines in this release we successfully scored
+- `R` = wine's `ratings_average`, `v` = `ratings_count`
+- `m` = prior weight (default `50`)
+- `C` = mean `ratings_average` across scored wines in this release
 
-Wines we couldn't match on Vivino are excluded from the ranking, not zero-scored. If fewer than `TOP_N` remain, send what we have.
-
-## Notification message
-
-One Telegram message per subscriber. Bullet list of the top `TOP_N` wines; each bullet has:
-
-- wine name
-- score (one decimal)
-- link to the Vivino wine page (from the matched wine's Vivino id)
-- link to the Systembolaget product page (from the product's Systembolaget id)
+Wines without a Vivino match are excluded, not zero-scored.

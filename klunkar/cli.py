@@ -49,16 +49,18 @@ def preview(release_date: Optional[str] = typer.Argument(None)) -> None:
 
     with db.get_conn() as conn:
         db.migrate(conn)
-        with httpx.Client() as client:
-            products = release._fetch_with_key_refresh(target, conn, client)
-            if not products:
-                typer.echo(f"No products found for {target}")
-                raise typer.Exit(1)
-            wines = release.rank_release(products, client)
-            if not wines:
-                typer.echo("No wines could be scored.")
-                raise typer.Exit(1)
-            typer.echo(release.format_message(wines, target))
+        cached = db.get_release_wines(conn, target)
+        if not cached:
+            typer.echo(f"No cached wines for {target} — run check-release first.")
+            raise typer.Exit(1)
+        wines = [
+            release.RankedWine(
+                rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+                sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
+            )
+            for r in cached
+        ]
+        typer.echo(release.format_message(wines, target))
 
 
 @app.command("bot")
