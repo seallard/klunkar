@@ -131,6 +131,24 @@ def save_release_wines(conn: psycopg.Connection, release_date: datetime.date, wi
     conn.commit()
 
 
+def get_release_wines(
+    conn: psycopg.Connection, release_date: datetime.date
+) -> list | None:
+    """Return ranked wine rows for a specific date, or None if not cached."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT rank, name, score, vivino_url, sb_url, price, wine_type
+            FROM release_wines
+            WHERE release_date = %s
+            ORDER BY rank
+            """,
+            (release_date,),
+        )
+        rows = cur.fetchall()
+        return rows if rows else None
+
+
 def get_last_release_wines(
     conn: psycopg.Connection, max_age_days: int | None = 7
 ) -> tuple[datetime.date, list] | None:

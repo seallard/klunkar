@@ -144,6 +144,37 @@ def format_message(
     return "\n".join(lines)
 
 
+def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
+    """Fetch and cache scored wines for all upcoming releases (next 90 days)."""
+    from datetime import timedelta
+
+    today = date.today()
+    key = _resolve_apim_key(conn, client)
+    try:
+        upcoming = systembolaget.fetch_upcoming_release_dates(
+            today, today + timedelta(days=90), key, client
+        )
+    except Exception as e:
+        log.error("Could not fetch upcoming release dates: %s", e)
+        return
+
+    for release_date in upcoming:
+        if db.get_release_wines(conn, release_date) is not None:
+            log.info("Release %s already cached, skipping prefetch.", release_date)
+            continue
+        try:
+            products = _fetch_with_key_refresh(release_date, conn, client)
+            if not products:
+                log.info("No products for %s, skipping.", release_date)
+                continue
+            wines = rank_release(products, client)
+            if wines:
+                db.save_release_wines(conn, release_date, wines)
+                log.info("Prefetched %d wines for %s.", len(wines), release_date)
+        except Exception as e:
+            log.error("Prefetch failed for %s: %s", release_date, e)
+
+
 def check_and_notify(conn: psycopg.Connection, client: httpx.Client, release_date: date) -> bool:
     """Return True if a release was found and notifications sent."""
     key = _resolve_apim_key(conn, client)

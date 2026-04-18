@@ -90,6 +90,47 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
             send_message(chat_id, format_message(wines, release_date, max_price=max_price))
         log.info("/budget from %d", chat_id)
 
+    elif text.startswith("/preview"):
+        parts = text.split()
+        if len(parts) >= 2:
+            try:
+                target = date.fromisoformat(parts[1])
+            except ValueError:
+                send_message(chat_id, "Ange ett datum, t\\.ex\\. /preview 2026\\-05\\-08\\.")
+                return
+        else:
+            try:
+                key = _resolve_apim_key(conn, client)
+                upcoming = systembolaget.fetch_upcoming_release_dates(
+                    date.today(), date.today() + timedelta(days=90), key, client
+                )
+            except Exception as e:
+                log.error("Failed to fetch upcoming dates for preview: %s", e)
+                send_message(chat_id, "Kunde inte hämta kommande släpp just nu\\.")
+                return
+            if not upcoming:
+                send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
+                return
+            target = upcoming[0]
+
+        rows = db.get_release_wines(conn, target)
+        if rows is None:
+            send_message(
+                chat_id,
+                f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
+            )
+            return
+        wines = [
+            RankedWine(
+                rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+                sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
+            )
+            for r in rows
+        ]
+        max_price = db.get_subscriber_budget(conn, chat_id)
+        send_message(chat_id, format_message(wines, target, max_price=max_price))
+        log.info("/preview %s from %d", target, chat_id)
+
     elif text.startswith("/releases"):
         today = date.today()
         try:
@@ -117,6 +158,8 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
             "*/start* — prenumerera\n"
             "*/stop* — avsluta\n"
             "*/releases* — kommande släpp\n"
+            "*/preview* — visa viner för nästa släpp\n"
+            "*/preview 2026\\-05\\-08* — visa viner för ett specifikt datum\n"
             "*/budget 150* — visa viner under 150 kr\n"
             "*/budget* — ta bort budgetfilter",
         )
