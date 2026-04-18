@@ -17,16 +17,9 @@ _CALENDAR_URL = "https://www.systembolaget.se/nytt/om-vara-nyheter/lanseringar/"
 _APIM_KEY_RE = re.compile(r"['\"]([0-9a-f]{32})['\"]")
 _NEXT_CHUNK_RE = re.compile(r'src="(/_next/static/chunks/[^"]+\.js)"')
 
-_HREF_DATE_RE = re.compile(r"saljstart-fran=(\d{4}-\d{2}-\d{2})")
-_SV_DATE_RE = re.compile(
-    r"\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december)\b",
-    re.IGNORECASE,
+_HREF_DATE_RE = re.compile(
+    r"/sortiment/tillfalligt-sortiment/\?[^\"']*saljstart-fran=(\d{4}-\d{2}-\d{2})"
 )
-_SV_MONTHS = {
-    "januari": 1, "februari": 2, "mars": 3, "april": 4,
-    "maj": 5, "juni": 6, "juli": 7, "augusti": 8,
-    "september": 9, "oktober": 10, "november": 11, "december": 12,
-}
 
 
 @dataclass
@@ -71,15 +64,6 @@ def scrape_release_dates(client: httpx.Client) -> list[date]:
     for m in _HREF_DATE_RE.finditer(html):
         dates.add(date.fromisoformat(m.group(1)))
 
-    for m in _SV_DATE_RE.finditer(html):
-        day = int(m.group(1))
-        month = _SV_MONTHS[m.group(2).lower()]
-        year = today.year if month >= today.month else today.year + 1
-        try:
-            dates.add(date(year, month, day))
-        except ValueError:
-            pass
-
     yesterday = today - timedelta(days=1)
     return sorted(d for d in dates if d >= yesterday)
 
@@ -119,8 +103,6 @@ def fetch_release_products(
 ) -> list[SBProduct]:
     date_str = release_date.isoformat()
     params = {
-        "productLaunchDate.min": date_str,
-        "productLaunchDate.max": date_str,
         "assortmentText": "Tillfälligt sortiment",
         "categoryLevel1": "Vin",
         "page": 1,
@@ -138,7 +120,8 @@ def fetch_release_products(
         meta = data.get("metadata", {})
         total_pages = meta.get("totalPages", 1)
         for p in data.get("products", []):
-            products.append(_parse_product(p))
+            if (p.get("productLaunchDate") or "")[:10] == date_str:
+                products.append(_parse_product(p))
         params["page"] += 1
 
     log.info("Fetched %d products for %s", len(products), date_str)
