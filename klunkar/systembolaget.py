@@ -2,7 +2,7 @@ import logging
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 
@@ -80,7 +80,8 @@ def scrape_release_dates(client: httpx.Client) -> list[date]:
         except ValueError:
             pass
 
-    return sorted(d for d in dates if d >= today)
+    yesterday = today - timedelta(days=1)
+    return sorted(d for d in dates if d >= yesterday)
 
 
 def _headers(apim_key: str) -> dict:

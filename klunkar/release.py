@@ -154,25 +154,28 @@ def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
     except Exception as e:
         log.error("Could not scrape release dates: %s", e)
         return
-    upcoming = [d for d in all_dates if d <= today + timedelta(days=10)]
+    upcoming = [d for d in all_dates if today - timedelta(days=1) <= d <= today + timedelta(days=10)]
+    log.info("Found %d upcoming release(s) within 10 days: %s", len(upcoming), [str(d) for d in upcoming])
 
     db.save_release_dates(conn, upcoming)
 
-    for release_date in upcoming:
+    for i, release_date in enumerate(upcoming, 1):
+        log.info("[%d/%d] Processing release %s", i, len(upcoming), release_date)
         if db.get_release_wines(conn, release_date) is not None:
-            log.info("Release %s already cached, skipping prefetch.", release_date)
+            log.info("[%d/%d] Release %s already cached, skipping.", i, len(upcoming), release_date)
             continue
         try:
             products = _fetch_with_key_refresh(release_date, conn, client)
             if not products:
-                log.info("No products for %s, skipping.", release_date)
+                log.info("[%d/%d] No products found on Systembolaget for %s, skipping.", i, len(upcoming), release_date)
                 continue
+            log.info("[%d/%d] Fetched %d products from Systembolaget for %s, scoring via Vivino…", i, len(upcoming), len(products), release_date)
             wines = rank_release(products, client)
+            log.info("[%d/%d] Scored %d/%d wines for %s, saving to DB.", i, len(upcoming), len(wines), len(products), release_date)
             if wines:
                 db.save_release_wines(conn, release_date, wines)
-                log.info("Prefetched %d wines for %s.", len(wines), release_date)
         except Exception as e:
-            log.error("Prefetch failed for %s: %s", release_date, e)
+            log.error("[%d/%d] Prefetch failed for %s: %s", i, len(upcoming), release_date, e)
 
 
 def check_and_notify(conn: psycopg.Connection, client: httpx.Client, release_date: date) -> bool:

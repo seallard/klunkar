@@ -11,16 +11,44 @@ log = logging.getLogger(__name__)
 
 _WINERY_URL = "https://www.vivino.com/api/wineries/{seo_name}/wines"
 _WINE_PAGE_URL = "https://www.vivino.com/w/{wine_id}"
-_HEADERS = {
-    "User-Agent": (
+_USER_AGENTS = [
+    (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/124.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.vivino.com/",
-}
-_REQUEST_DELAY = 0.3  # seconds between requests
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/123.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    ),
+    (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/17.4 Safari/605.1.15"
+    ),
+]
+_REQUEST_DELAY = 1.0  # seconds between requests
+_RETRY_DELAY = 10.0   # seconds to wait before retrying after a 403
+_MAX_RETRIES = 2
+
+_ua_index = 0
+
+
+def _next_headers() -> dict:
+    global _ua_index
+    ua = _USER_AGENTS[_ua_index % len(_USER_AGENTS)]
+    _ua_index += 1
+    return {
+        "User-Agent": ua,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.vivino.com/",
+    }
 
 _STRIP_PREFIXES = re.compile(
     r"^(bodegas?|weingut|weinguter|domaines?|chateaux?|quinta|tenuta|fattoria|maison|cantina|caves?)\s+",
@@ -69,23 +97,32 @@ def _fetch_wines(seo_name: str, client: httpx.Client, cache: dict) -> list[dict]
     """Return wine list for seo_name (cached), or None if not found."""
     if seo_name in cache:
         return cache[seo_name]
-    time.sleep(_REQUEST_DELAY)
-    try:
-        r = client.get(_WINERY_URL.format(seo_name=seo_name), headers=_HEADERS, timeout=10)
-    except httpx.RequestError as e:
-        log.warning("Vivino request failed for %s: %s", seo_name, e)
-        cache[seo_name] = None
-        return None
-    if r.status_code == 404:
-        cache[seo_name] = None
-        return None
-    if r.status_code != 200:
-        log.warning("Vivino returned %d for %s", r.status_code, seo_name)
-        cache[seo_name] = None
-        return None
-    wines = r.json().get("wines", [])
-    cache[seo_name] = wines
-    return wines
+    url = _WINERY_URL.format(seo_name=seo_name)
+    for attempt in range(_MAX_RETRIES):
+        time.sleep(_REQUEST_DELAY)
+        try:
+            r = client.get(url, headers=_next_headers(), timeout=10)
+        except httpx.RequestError as e:
+            log.warning("Vivino request failed for %s: %s", seo_name, e)
+            cache[seo_name] = None
+            return None
+        if r.status_code == 404:
+            cache[seo_name] = None
+            return None
+        if r.status_code == 403:
+            log.warning("Vivino 403 for %s (attempt %d/%d), backing off…", seo_name, attempt + 1, _MAX_RETRIES)
+            time.sleep(_RETRY_DELAY)
+            continue
+        if r.status_code != 200:
+            log.warning("Vivino returned %d for %s", r.status_code, seo_name)
+            cache[seo_name] = None
+            return None
+        wines = r.json().get("wines", [])
+        cache[seo_name] = wines
+        return wines
+    log.warning("Vivino 403 persisted for %s after %d retries, skipping.", seo_name, _MAX_RETRIES)
+    cache[seo_name] = None
+    return None
 
 
 def lookup(
