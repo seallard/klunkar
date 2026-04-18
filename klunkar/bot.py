@@ -133,17 +133,9 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
 
     elif text.startswith("/releases"):
         today = date.today()
-        try:
-            key = _resolve_apim_key(conn, client)
-            dates = systembolaget.fetch_upcoming_release_dates(
-                today, today + timedelta(days=90), key, client
-            )
-        except Exception as e:
-            log.error("Failed to fetch release dates: %s", e)
-            send_message(chat_id, "Kunde inte hämta kommande släpp just nu\\.")
-            return
+        dates = db.get_upcoming_release_dates(conn, today)
         if not dates:
-            send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
+            send_message(chat_id, "Inga kommande släpp hittades\\.")
         else:
             lines = ["*Kommande släpp:*", ""]
             for d in dates:

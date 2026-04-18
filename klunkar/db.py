@@ -62,6 +62,12 @@ def migrate(conn: psycopg.Connection) -> None:
                 CHECK (id = 1)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS upcoming_release_dates (
+                release_date DATE PRIMARY KEY,
+                fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
     conn.commit()
 
 
@@ -227,3 +233,25 @@ def remove_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
         deleted = cur.rowcount == 1
     conn.commit()
     return deleted
+
+
+def save_release_dates(conn: psycopg.Connection, dates: list[datetime.date]) -> None:
+    with conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO upcoming_release_dates (release_date)
+            VALUES (%s)
+            ON CONFLICT DO NOTHING
+            """,
+            [(d,) for d in dates],
+        )
+    conn.commit()
+
+
+def get_upcoming_release_dates(conn: psycopg.Connection, from_date: datetime.date) -> list[datetime.date]:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT release_date FROM upcoming_release_dates WHERE release_date >= %s ORDER BY release_date",
+            (from_date,),
+        )
+        return [row[0] for row in cur.fetchall()]

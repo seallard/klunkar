@@ -158,6 +158,8 @@ def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
         log.error("Could not fetch upcoming release dates: %s", e)
         return
 
+    db.save_release_dates(conn, upcoming)
+
     for release_date in upcoming:
         if db.get_release_wines(conn, release_date) is not None:
             log.info("Release %s already cached, skipping prefetch.", release_date)
