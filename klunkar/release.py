@@ -152,7 +152,7 @@ def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
     key = _resolve_apim_key(conn, client)
     try:
         upcoming = systembolaget.fetch_upcoming_release_dates(
-            today, today + timedelta(days=90), key, client
+            today, today + timedelta(days=10), key, client
         )
     except Exception as e:
         log.error("Could not fetch upcoming release dates: %s", e)
