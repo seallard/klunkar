@@ -1,5 +1,5 @@
-import itertools
 import logging
+import random
 import re
 import time
 import unicodedata
@@ -33,12 +33,15 @@ _USER_AGENTS = [
         "AppleWebKit/605.1.15 (KHTML, like Gecko) "
         "Version/17.4 Safari/605.1.15"
     ),
+    (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+    ),
 ]
-_REQUEST_DELAY = 0.3
-_RETRY_DELAY = 10.0
+_REQUEST_DELAY_RANGE = (0.5, 2.0)
+_RETRY_DELAY_RANGE = (8.0, 20.0)
 _MAX_RETRIES = 2
-
-_ua_cycle = itertools.cycle(_USER_AGENTS)
 
 _STRIP_PREFIXES = re.compile(
     r"^(bodegas?|weingut|weinguter|domaines?|chateaux?|quinta|tenuta|fattoria|maison|cantina|caves?)\s+",
@@ -76,7 +79,7 @@ def _slug_candidates(producer: str) -> list[str]:
 
 def _next_headers() -> dict:
     return {
-        "User-Agent": next(_ua_cycle),
+        "User-Agent": random.choice(_USER_AGENTS),
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": "https://www.vivino.com/",
     }
@@ -89,7 +92,7 @@ def _fetch_wines(
         return cache[slug]
     url = _WINERY_URL.format(slug=slug)
     for attempt in range(_MAX_RETRIES):
-        time.sleep(_REQUEST_DELAY)
+        time.sleep(random.uniform(*_REQUEST_DELAY_RANGE))
         try:
             r = client.get(url, headers=_next_headers(), timeout=10)
         except httpx.RequestError as e:
@@ -101,7 +104,7 @@ def _fetch_wines(
             return None
         if r.status_code == 403:
             log.warning("Vivino 403 for %s (attempt %d/%d), backing off…", slug, attempt + 1, _MAX_RETRIES)
-            time.sleep(_RETRY_DELAY)
+            time.sleep(random.uniform(*_RETRY_DELAY_RANGE))
             continue
         if r.status_code != 200:
             log.warning("Vivino returned %d for %s", r.status_code, slug)
