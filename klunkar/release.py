@@ -185,16 +185,18 @@ def check_and_notify(conn: psycopg.Connection, client: httpx.Client, release_dat
         log.info("Release %s already notified, skipping.", release_date)
         return False
 
-    products = _fetch_with_key_refresh(release_date, conn, client)
-    wines = rank_release(products, client)
-    db.save_release_wines(conn, release_date, wines)
-
-    if not wines:
-        log.warning(
-            "Release on %s but no wines could be scored — skipping notification.",
-            release_date,
-        )
+    cached = db.get_release_wines(conn, release_date)
+    if not cached:
+        log.warning("Release on %s but no cached wines — skipping notification.", release_date)
         return False
+
+    wines = [
+        RankedWine(
+            rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+            sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
+        )
+        for r in cached
+    ]
 
     subscribers = db.get_subscribers(conn)
     log.info("Sending to %d subscribers.", len(subscribers))
