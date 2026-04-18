@@ -177,16 +177,7 @@ def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
 
 def check_and_notify(conn: psycopg.Connection, client: httpx.Client, release_date: date) -> bool:
     """Return True if a release was found and notifications sent."""
-    key = _resolve_apim_key(conn, client)
-    try:
-        found = systembolaget.has_release(release_date, key, client)
-    except PermissionError:
-        log.info("APIM key rejected on has_release check, re-scraping…")
-        key = systembolaget.scrape_apim_key(client)
-        db.set_apim_key(conn, key)
-        found = systembolaget.has_release(release_date, key, client)
-
-    if not found:
+    if not db.is_upcoming_release_date(conn, release_date):
         log.info("No release on %s, exiting quietly.", release_date)
         return False
 

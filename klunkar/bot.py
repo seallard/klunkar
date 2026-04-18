@@ -4,7 +4,7 @@ from datetime import date
 
 import httpx
 
-from klunkar import config, db, systembolaget
+from klunkar import config, db
 from klunkar.release import RankedWine, _escape, _sv_date, format_message
 from klunkar.telegram import send_message
 
@@ -113,12 +113,7 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
                 send_message(chat_id, "Ange ett datum, t\\.ex\\. /preview 2026\\-05\\-08\\.")
                 return
         else:
-            try:
-                upcoming = systembolaget.scrape_release_dates(client)
-            except Exception as e:
-                log.error("Failed to scrape release dates for preview: %s", e)
-                send_message(chat_id, "Kunde inte hämta kommande släpp just nu\\.")
-                return
+            upcoming = db.get_upcoming_release_dates(conn, date.today())
             if not upcoming:
                 send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
                 return

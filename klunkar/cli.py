@@ -31,9 +31,9 @@ def check_release() -> None:
     with db.get_conn() as conn:
         db.migrate(conn)
         with httpx.Client() as client:
+            release.prefetch_upcoming(conn, client)
             for offset in (0, 1):
                 release.check_and_notify(conn, client, today + timedelta(days=offset))
-            release.prefetch_upcoming(conn, client)
 
 
 @app.command("preview")

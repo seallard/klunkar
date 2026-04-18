@@ -25,6 +25,9 @@ def migrate(conn: psycopg.Connection) -> None:
             ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS max_price FLOAT
         """)
         cur.execute("""
+            ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS last_preview_date DATE
+        """)
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS seen_releases (
                 release_date DATE PRIMARY KEY,
                 notified_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -235,6 +238,28 @@ def remove_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
     return deleted
 
 
+def set_subscriber_preview_date(
+    conn: psycopg.Connection, chat_id: int, release_date: datetime.date
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE subscribers SET last_preview_date = %s WHERE chat_id = %s",
+            (release_date, chat_id),
+        )
+    conn.commit()
+
+
+def get_subscriber_preview_date(
+    conn: psycopg.Connection, chat_id: int
+) -> datetime.date | None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT last_preview_date FROM subscribers WHERE chat_id = %s", (chat_id,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
 def save_release_dates(conn: psycopg.Connection, dates: list[datetime.date]) -> None:
     with conn.cursor() as cur:
         cur.executemany(
@@ -246,6 +271,14 @@ def save_release_dates(conn: psycopg.Connection, dates: list[datetime.date]) -> 
             [(d,) for d in dates],
         )
     conn.commit()
+
+
+def is_upcoming_release_date(conn: psycopg.Connection, release_date: datetime.date) -> bool:
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM upcoming_release_dates WHERE release_date = %s", (release_date,)
+        )
+        return cur.fetchone() is not None
 
 
 def get_upcoming_release_dates(conn: psycopg.Connection, from_date: datetime.date) -> list[datetime.date]:
