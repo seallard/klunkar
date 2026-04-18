@@ -91,7 +91,7 @@ def prime_session(client: httpx.Client) -> None:
 
 
 def _next_headers(slug: str) -> dict:
-    ua, _, _ = random.choice(_USER_AGENTS)
+    ua = random.choice(_USER_AGENTS)
     return {
         "User-Agent": ua,
         "Accept-Language": "en-US,en;q=0.9",
