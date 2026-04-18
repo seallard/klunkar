@@ -78,20 +78,11 @@ def _slug_candidates(producer: str) -> list[str]:
 
 
 def prime_session(client: httpx.Client) -> None:
-    ua, sec_ch_ua, platform = random.choice(_USER_AGENTS)
     headers = {
-        "User-Agent": ua,
+        "User-Agent": random.choice(_USER_AGENTS),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
     }
-    if sec_ch_ua:
-        headers["sec-ch-ua"] = sec_ch_ua
-        headers["sec-ch-ua-mobile"] = "?0"
-        headers["sec-ch-ua-platform"] = f'"{platform}"'
     try:
         client.get("https://www.vivino.com/", headers=headers, timeout=15)
         log.debug("Vivino session primed.")
