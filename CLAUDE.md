@@ -65,7 +65,7 @@ No official API. We use the same endpoint systembolaget.se itself calls:
 
 - `GET https://api-extern.systembolaget.se/sb-api-ecommerce/v1/productsearch/search`
 - Header: `Ocp-Apim-Subscription-Key: <key>`
-- Filter params for our use case: `productLaunch.min`, `productLaunch.max` (both `YYYY-MM-DD`), `assortmentText=Tillfälligt sortiment`, `categoryLevel1=Vin`
+- Filter params for our use case: `productLaunchDate.min`, `productLaunchDate.max` (both `YYYY-MM-DD`), `assortmentText=Tillfälligt sortiment`, `categoryLevel1=Vin`
 - Pagination: 30/page via `page=N`; use `metadata.totalPages`
 - The frontend URL names (`saljstart-fran`, etc.) are silently ignored — use the API names above
 
@@ -82,8 +82,8 @@ The key is a `NEXT_PUBLIC_API_KEY_APIM` value embedded in systembolaget.se's pub
 We do **not** try to discover the next upcoming release date. `check-release` runs daily and asks: *"is there a release tomorrow?"*
 
 ```
-productLaunch.min = tomorrow
-productLaunch.max = tomorrow
+productLaunchDate.min = tomorrow
+productLaunchDate.max = tomorrow
 assortmentText    = Tillfälligt sortiment
 categoryLevel1    = Vin
 ```

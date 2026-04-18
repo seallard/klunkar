@@ -83,8 +83,8 @@ def fetch_release_products(
 ) -> list[SBProduct]:
     date_str = release_date.isoformat()
     params = {
-        "productLaunch.min": date_str,
-        "productLaunch.max": date_str,
+        "productLaunchDate.min": date_str,
+        "productLaunchDate.max": date_str,
         "assortmentText": "Tillfälligt sortiment",
         "categoryLevel1": "Vin",
         "page": 1,
@@ -116,8 +116,8 @@ def fetch_upcoming_release_dates(
     client: httpx.Client,
 ) -> list[date]:
     params = {
-        "productLaunch.min": from_date.isoformat(),
-        "productLaunch.max": to_date.isoformat(),
+        "productLaunchDate.min": from_date.isoformat(),
+        "productLaunchDate.max": to_date.isoformat(),
         "assortmentText": "Tillfälligt sortiment",
         "categoryLevel1": "Vin",
         "page": 1,
@@ -132,7 +132,7 @@ def fetch_upcoming_release_dates(
         data = r.json()
         total_pages = data.get("metadata", {}).get("totalPages", 1)
         for p in data.get("products", []):
-            launch = p.get("productLaunch")
+            launch = p.get("productLaunchDate")
             if launch:
                 dates.add(date.fromisoformat(launch[:10]))
         params["page"] += 1
@@ -142,8 +142,8 @@ def fetch_upcoming_release_dates(
 def has_release(release_date: date, apim_key: str, client: httpx.Client) -> bool:
     date_str = release_date.isoformat()
     params = {
-        "productLaunch.min": date_str,
-        "productLaunch.max": date_str,
+        "productLaunchDate.min": date_str,
+        "productLaunchDate.max": date_str,
         "assortmentText": "Tillfälligt sortiment",
         "categoryLevel1": "Vin",
         "page": 1,
