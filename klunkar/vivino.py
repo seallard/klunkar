@@ -16,37 +16,27 @@ _USER_AGENTS = [
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/135.0.0.0 Safari/537.36",
-        '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-        "macOS",
+        "Chrome/135.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/134.0.0.0 Safari/537.36",
-        '"Google Chrome";v="134", "Not-A.Brand";v="8", "Chromium";v="134"',
-        "Windows",
+        "Chrome/134.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/133.0.0.0 Safari/537.36",
-        '"Google Chrome";v="133", "Not-A.Brand";v="8", "Chromium";v="133"',
-        "Linux",
+        "Chrome/133.0.0.0 Safari/537.36"
     ),
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) "
         "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-        "Version/18.3 Safari/605.1.15",
-        None,
-        "macOS",
+        "Version/18.3 Safari/605.1.15"
     ),
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
-        '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-        "Windows",
+        "Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
     ),
 ]
 _REQUEST_DELAY_RANGE = (0.5, 2.0)
@@ -110,21 +100,12 @@ def prime_session(client: httpx.Client) -> None:
 
 
 def _next_headers(slug: str) -> dict:
-    ua, sec_ch_ua, platform = random.choice(_USER_AGENTS)
-    headers = {
+    ua, _, _ = random.choice(_USER_AGENTS)
+    return {
         "User-Agent": ua,
-        "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": f"https://www.vivino.com/wineries/{slug}",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
     }
-    if sec_ch_ua:
-        headers["sec-ch-ua"] = sec_ch_ua
-        headers["sec-ch-ua-mobile"] = "?0"
-        headers["sec-ch-ua-platform"] = f'"{platform}"'
-    return headers
 
 
 def _fetch_wines(
