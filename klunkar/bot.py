@@ -128,7 +128,7 @@ def _handle_update(update: dict, conn: psycopg.Connection) -> None:
         else:
             lines = ["*Kommande släpp:*", ""]
             for d in dates:
-                lines.append(f"• {d.isoformat()}")
+                lines.append(f"• {_escape(_sv_date(d))}")
             send_message(chat_id, "\n".join(lines))
         log.info("/releases from %d", chat_id)
 
