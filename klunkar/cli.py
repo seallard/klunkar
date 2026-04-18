@@ -38,17 +38,20 @@ def check_release() -> None:
 
 @app.command("preview")
 def preview(release_date: Optional[str] = typer.Argument(None)) -> None:
-    """Dry run: print the ranked wine list for a release date (default: today)."""
+    """Dry run: print the ranked wine list for a release date (default: next upcoming)."""
     _setup_logging()
     from klunkar import db, release
 
-    if release_date:
-        target = date.fromisoformat(release_date)
-    else:
-        target = date.today()
-
     with db.get_conn() as conn:
         db.migrate(conn)
+        if release_date:
+            target = date.fromisoformat(release_date)
+        else:
+            upcoming = db.get_upcoming_release_dates(conn, date.today())
+            if not upcoming:
+                typer.echo("No upcoming release dates cached — run check-release first.")
+                raise typer.Exit(1)
+            target = upcoming[0]
         cached = db.get_release_wines(conn, target)
         if not cached:
             typer.echo(f"No cached wines for {target} — run check-release first.")
