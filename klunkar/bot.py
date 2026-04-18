@@ -3,6 +3,7 @@ import time
 from datetime import date, timedelta
 
 import httpx
+import psycopg
 
 from klunkar import config, db
 from klunkar.release import RankedWine, _escape, _sv_date, format_message
@@ -19,6 +20,16 @@ _WELCOME = (
 )
 
 
+def _wines_from_rows(rows) -> list[RankedWine]:
+    return [
+        RankedWine(
+            rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+            sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
+        )
+        for r in rows
+    ]
+
+
 def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
     r = client.get(
         f"{base}/getUpdates",
@@ -33,7 +44,7 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
     return r.json().get("result", [])
 
 
-def _handle_update(update: dict, conn, client: httpx.Client) -> None:
+def _handle_update(update: dict, conn: psycopg.Connection) -> None:
     msg = update.get("message", {})
     text = msg.get("text", "")
     chat_id = msg.get("chat", {}).get("id")
@@ -52,20 +63,8 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
                 if result:
                     release_date, rows = result
             if rows:
-                wines = [
-                    RankedWine(
-                        rank=r[0],
-                        name=r[1],
-                        score=r[2],
-                        vivino_url=r[3],
-                        sb_url=r[4],
-                        price=r[5] or 0.0,
-                        wine_type=r[6] or "",
-                    )
-                    for r in rows
-                ]
                 max_price = db.get_subscriber_budget(conn, chat_id)
-                send_message(chat_id, format_message(wines, release_date, max_price=max_price))
+                send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
         log.info("/start from %d (new=%s)", chat_id, new)
 
     elif text.startswith("/budget"):
@@ -86,27 +85,13 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
         if preview_date:
             rows = db.get_release_wines(conn, preview_date)
             if rows:
-                wines = [
-                    RankedWine(
-                        rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
-                        sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
-                    )
-                    for r in rows
-                ]
-                send_message(chat_id, format_message(wines, preview_date, max_price=max_price))
+                send_message(chat_id, format_message(_wines_from_rows(rows), preview_date, max_price=max_price))
                 log.info("/budget from %d", chat_id)
                 return
         result = db.get_last_release_wines(conn, max_age_days=None)
         if result:
             release_date, rows = result
-            wines = [
-                RankedWine(
-                    rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
-                    sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
-                )
-                for r in rows
-            ]
-            send_message(chat_id, format_message(wines, release_date, max_price=max_price))
+            send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
         log.info("/budget from %d", chat_id)
 
     elif text.startswith("/preview"):
@@ -131,21 +116,13 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
                 f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
             )
             return
-        wines = [
-            RankedWine(
-                rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
-                sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
-            )
-            for r in rows
-        ]
         max_price = db.get_subscriber_budget(conn, chat_id)
         db.set_subscriber_preview_date(conn, chat_id, target)
-        send_message(chat_id, format_message(wines, target, max_price=max_price))
+        send_message(chat_id, format_message(_wines_from_rows(rows), target, max_price=max_price))
         log.info("/preview %s from %d", target, chat_id)
 
     elif text.startswith("/releases"):
-        today = date.today()
-        dates = db.get_upcoming_release_dates(conn, today)
+        dates = db.get_upcoming_release_dates(conn, date.today())
         if not dates:
             send_message(chat_id, "Inga kommande släpp hittades\\.")
         else:
@@ -171,15 +148,11 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
 
     elif text.startswith("/stop"):
         removed = db.remove_subscriber(conn, chat_id)
-        reply = "Du är nu avprenumererad\\. Skriv /start för att prenumerera igen\\."
-        send_message(chat_id, reply)
+        send_message(chat_id, "Du är nu avprenumererad\\. Skriv /start för att prenumerera igen\\.")
         log.info("/stop from %d (removed=%s)", chat_id, removed)
 
 
 def run() -> None:
-    import os
-    log.info("ENV DUMP: %s", {k: v for k, v in os.environ.items() if "TOKEN" not in k and "PASSWORD" not in k and "URL" not in k})
-    log.info("TOKEN set: %s, DB set: %s", bool(config.TELEGRAM_BOT_TOKEN), bool(config.DATABASE_URL))
     if not config.TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 
@@ -187,7 +160,6 @@ def run() -> None:
     offset = 0
 
     with db.get_conn() as conn:
-        db.migrate(conn)
         log.info("Bot started, long-polling…")
         with httpx.Client() as client:
             while True:
@@ -200,7 +172,7 @@ def run() -> None:
 
                 for update in updates:
                     try:
-                        _handle_update(update, conn, client)
+                        _handle_update(update, conn)
                     except Exception as e:
                         log.error("Error handling update %s: %s", update.get("update_id"), e)
                         conn.rollback()

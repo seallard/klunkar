@@ -58,14 +58,13 @@ def scrape_release_dates(client: httpx.Client) -> list[date]:
     r = client.get(_CALENDAR_URL, follow_redirects=True)
     r.raise_for_status()
     html = r.text
-    today = date.today()
+
     dates: set[date] = set()
 
     for m in _HREF_DATE_RE.finditer(html):
         dates.add(date.fromisoformat(m.group(1)))
 
-    yesterday = today - timedelta(days=1)
-    return sorted(d for d in dates if d >= yesterday)
+    return sorted(d for d in dates if d >= date.today())
 
 
 def _headers(apim_key: str) -> dict:

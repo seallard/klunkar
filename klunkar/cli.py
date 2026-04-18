@@ -1,18 +1,19 @@
 import logging
 import sys
-from datetime import date, timedelta
-from typing import Optional
+from datetime import date
 
 import httpx
 import typer
 
-from klunkar import config
+from klunkar import config, db, release
+from klunkar.bot import run as run_bot
 
 app = typer.Typer()
 subscribers_app = typer.Typer()
 app.add_typer(subscribers_app, name="subscribers")
 
 
+@app.callback()
 def _setup_logging() -> None:
     logging.basicConfig(
         level=config.LOG_LEVEL,
@@ -21,29 +22,29 @@ def _setup_logging() -> None:
     )
 
 
-@app.command("check-release")
-def check_release() -> None:
-    """Check if there is a release today or tomorrow and notify subscribers."""
-    _setup_logging()
-    from klunkar import db, release
-
-    today = date.today()
+@app.command("migrate")
+def migrate() -> None:
+    """Run database migrations."""
     with db.get_conn() as conn:
         db.migrate(conn)
+    typer.echo("Migrations complete.")
+
+
+@app.command("check-release")
+def check_release() -> None:
+    """Check if there is a release tomorrow and notify subscribers."""
+
+    with db.get_conn() as conn:
         with httpx.Client() as client:
             release.prefetch_upcoming(conn, client)
-            for offset in (0, 1):
-                release.check_and_notify(conn, client, today + timedelta(days=offset))
+            release.check_and_notify(conn)
 
 
 @app.command("preview")
-def preview(release_date: Optional[str] = typer.Argument(None)) -> None:
+def preview(release_date: str | None = typer.Argument(None)) -> None:
     """Dry run: print the ranked wine list for a release date (default: next upcoming)."""
-    _setup_logging()
-    from klunkar import db, release
 
     with db.get_conn() as conn:
-        db.migrate(conn)
         if release_date:
             target = date.fromisoformat(release_date)
         else:
@@ -69,17 +70,13 @@ def preview(release_date: Optional[str] = typer.Argument(None)) -> None:
 @app.command("bot")
 def bot() -> None:
     """Run the long-polling Telegram bot."""
-    _setup_logging()
-    from klunkar.bot import run
 
-    run()
+    run_bot()
 
 
 @subscribers_app.command("list")
 def subscribers_list() -> None:
     """List all subscribers."""
-    from klunkar import db
-
     with db.get_conn() as conn:
         subs = db.get_subscribers(conn)
     for chat_id in subs:

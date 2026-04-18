@@ -1,5 +1,5 @@
-import datetime
 from contextlib import contextmanager
+from datetime import date
 
 import psycopg
 
@@ -16,9 +16,10 @@ def migrate(conn: psycopg.Connection) -> None:
     with conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS subscribers (
-                chat_id    BIGINT PRIMARY KEY,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-                max_price  FLOAT
+                chat_id          BIGINT PRIMARY KEY,
+                created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+                max_price        FLOAT,
+                last_preview_date DATE
             )
         """)
         cur.execute("""
@@ -88,62 +89,48 @@ def set_apim_key(conn: psycopg.Connection, key: str) -> None:
             INSERT INTO apim_key (id, key, updated_at)
             VALUES (1, %s, now())
             ON CONFLICT (id) DO UPDATE SET key = EXCLUDED.key, updated_at = now()
-        """,
+            """,
             (key,),
         )
     conn.commit()
 
 
-def is_release_seen(conn: psycopg.Connection, release_date: datetime.date) -> bool:
+def is_release_seen(conn: psycopg.Connection, release_date: date) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM seen_releases WHERE release_date = %s", (release_date,))
         return cur.fetchone() is not None
 
 
-def mark_release_seen(
-    conn: psycopg.Connection, release_date: datetime.date, wine_count: int
-) -> None:
+def mark_release_seen(conn: psycopg.Connection, release_date: date, wine_count: int) -> None:
     with conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO seen_releases (release_date, wine_count)
             VALUES (%s, %s)
             ON CONFLICT DO NOTHING
-        """,
+            """,
             (release_date, wine_count),
         )
     conn.commit()
 
 
-def save_release_wines(conn: psycopg.Connection, release_date: datetime.date, wines: list) -> None:
+def save_release_wines(conn: psycopg.Connection, release_date: date, wines: list) -> None:
     with conn.cursor() as cur:
         cur.executemany(
             """
             INSERT INTO release_wines (release_date, rank, name, score, vivino_url, sb_url, price, wine_type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT DO NOTHING
-        """,
+            """,
             [
-                (
-                    release_date,
-                    w.rank,
-                    w.name,
-                    w.score,
-                    w.vivino_url,
-                    w.sb_url,
-                    w.price,
-                    w.wine_type,
-                )
+                (release_date, w.rank, w.name, w.score, w.vivino_url, w.sb_url, w.price, w.wine_type)
                 for w in wines
             ],
         )
     conn.commit()
 
 
-def get_release_wines(
-    conn: psycopg.Connection, release_date: datetime.date
-) -> list | None:
-    """Return ranked wine rows for a specific date, or None if not cached."""
+def get_release_wines(conn: psycopg.Connection, release_date: date) -> list | None:
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -160,14 +147,15 @@ def get_release_wines(
 
 def get_last_release_wines(
     conn: psycopg.Connection, max_age_days: int | None = 7
-) -> tuple[datetime.date, list] | None:
+) -> tuple[date, list] | None:
     with conn.cursor() as cur:
         if max_age_days is not None:
             cur.execute(
                 """
-                SELECT release_date FROM seen_releases
+                SELECT release_date FROM release_wines
                 WHERE release_date >= CURRENT_DATE - %s
                   AND release_date <= CURRENT_DATE
+                GROUP BY release_date
                 ORDER BY release_date DESC
                 LIMIT 1
                 """,
@@ -176,8 +164,9 @@ def get_last_release_wines(
         else:
             cur.execute(
                 """
-                SELECT release_date FROM seen_releases
+                SELECT release_date FROM release_wines
                 WHERE release_date <= CURRENT_DATE
+                GROUP BY release_date
                 ORDER BY release_date DESC
                 LIMIT 1
                 """
@@ -192,7 +181,7 @@ def get_last_release_wines(
             FROM release_wines
             WHERE release_date = %s
             ORDER BY rank
-        """,
+            """,
             (release_date,),
         )
         return release_date, cur.fetchall()
@@ -201,7 +190,7 @@ def get_last_release_wines(
 def get_subscribers(conn: psycopg.Connection) -> list[tuple[int, float | None]]:
     with conn.cursor() as cur:
         cur.execute("SELECT chat_id, max_price FROM subscribers")
-        return [(row[0], row[1]) for row in cur.fetchall()]
+        return cur.fetchall()
 
 
 def get_subscriber_budget(conn: psycopg.Connection, chat_id: int) -> float | None:
@@ -211,9 +200,7 @@ def get_subscriber_budget(conn: psycopg.Connection, chat_id: int) -> float | Non
         return row[0] if row else None
 
 
-def set_subscriber_budget(
-    conn: psycopg.Connection, chat_id: int, max_price: float | None
-) -> None:
+def set_subscriber_budget(conn: psycopg.Connection, chat_id: int, max_price: float | None) -> None:
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET max_price = %s WHERE chat_id = %s",
@@ -225,10 +212,7 @@ def set_subscriber_budget(
 def add_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
     with conn.cursor() as cur:
         cur.execute(
-            """
-            INSERT INTO subscribers (chat_id) VALUES (%s)
-            ON CONFLICT DO NOTHING
-        """,
+            "INSERT INTO subscribers (chat_id) VALUES (%s) ON CONFLICT DO NOTHING",
             (chat_id,),
         )
         inserted = cur.rowcount == 1
@@ -244,9 +228,7 @@ def remove_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
     return deleted
 
 
-def set_subscriber_preview_date(
-    conn: psycopg.Connection, chat_id: int, release_date: datetime.date
-) -> None:
+def set_subscriber_preview_date(conn: psycopg.Connection, chat_id: int, release_date: date) -> None:
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET last_preview_date = %s WHERE chat_id = %s",
@@ -255,9 +237,7 @@ def set_subscriber_preview_date(
     conn.commit()
 
 
-def get_subscriber_preview_date(
-    conn: psycopg.Connection, chat_id: int
-) -> datetime.date | None:
+def get_subscriber_preview_date(conn: psycopg.Connection, chat_id: int) -> date | None:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT last_preview_date FROM subscribers WHERE chat_id = %s", (chat_id,)
@@ -266,20 +246,16 @@ def get_subscriber_preview_date(
         return row[0] if row else None
 
 
-def save_release_dates(conn: psycopg.Connection, dates: list[datetime.date]) -> None:
+def save_release_dates(conn: psycopg.Connection, dates: list[date]) -> None:
     with conn.cursor() as cur:
         cur.executemany(
-            """
-            INSERT INTO upcoming_release_dates (release_date)
-            VALUES (%s)
-            ON CONFLICT DO NOTHING
-            """,
+            "INSERT INTO upcoming_release_dates (release_date) VALUES (%s) ON CONFLICT DO NOTHING",
             [(d,) for d in dates],
         )
     conn.commit()
 
 
-def is_upcoming_release_date(conn: psycopg.Connection, release_date: datetime.date) -> bool:
+def is_upcoming_release_date(conn: psycopg.Connection, release_date: date) -> bool:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT 1 FROM upcoming_release_dates WHERE release_date = %s", (release_date,)
@@ -287,7 +263,7 @@ def is_upcoming_release_date(conn: psycopg.Connection, release_date: datetime.da
         return cur.fetchone() is not None
 
 
-def get_upcoming_release_dates(conn: psycopg.Connection, from_date: datetime.date) -> list[datetime.date]:
+def get_upcoming_release_dates(conn: psycopg.Connection, from_date: date) -> list[date]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT release_date FROM upcoming_release_dates WHERE release_date >= %s ORDER BY release_date",

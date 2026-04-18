@@ -1,9 +1,10 @@
 import logging
 import re
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
+from klunkar.telegram import send_message
 import psycopg
 
 from klunkar import config, db, systembolaget, vivino
@@ -123,14 +124,18 @@ def _sv_date(d: date) -> str:
 def format_message(
     wines: list[RankedWine], release_date: date, max_price: float | None = None
 ) -> str:
-    if max_price is not None:
+    if max_price:
         wines = [w for w in wines if w.price <= max_price]
+
     wines = wines[: config.TOP_N]
     date_str = _escape(_sv_date(release_date))
     lines = [f"🍷 *Tillfälligt sortiment \u2014 {date_str}*"]
-    if max_price is not None:
+
+    if max_price:
         lines[0] += f" \\(max {_escape(f'{int(max_price)} kr')}\\)"
+
     lines.append("")
+
     for w in wines:
         name = _escape(w.name)
         medal = _MEDALS.get(w.rank, "")
@@ -141,79 +146,72 @@ def format_message(
         price_text = _escape(f"{int(w.price)} kr") if w.price else "köp"
         lines.append(f"🛒 [{price_text}]({w.sb_url})")
         lines.append("")
+
     return "\n".join(lines)
 
 
 def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
-    """Fetch and cache scored wines for all upcoming releases (next 90 days)."""
-    from datetime import timedelta
-
-    today = date.today()
+    """Fetch and cache scored wines for all upcoming releases (next 10 days)."""
     try:
         all_dates = systembolaget.scrape_release_dates(client)
     except Exception as e:
         log.error("Could not scrape release dates: %s", e)
         return
-    upcoming = [d for d in all_dates if today - timedelta(days=1) <= d <= today + timedelta(days=10)]
-    log.info("Found %d upcoming release(s) within 10 days: %s", len(upcoming), [str(d) for d in upcoming])
 
-    db.save_release_dates(conn, upcoming)
+    today = date.today()
+    horizon = today + timedelta(days=10)
+    upcoming_dates = [d for d in all_dates if today <= d < horizon]
 
-    for i, release_date in enumerate(upcoming, 1):
-        log.info("[%d/%d] Processing release %s", i, len(upcoming), release_date)
+    db.save_release_dates(conn, upcoming_dates)
+
+    for release_date in upcoming_dates:
         if db.get_release_wines(conn, release_date) is not None:
-            log.info("[%d/%d] Release %s already cached, skipping.", i, len(upcoming), release_date)
             continue
+
         try:
             products = _fetch_with_key_refresh(release_date, conn, client)
+
             if not products:
-                log.info("[%d/%d] No products found on Systembolaget for %s, skipping.", i, len(upcoming), release_date)
                 continue
-            log.info("[%d/%d] Fetched %d products from Systembolaget for %s, scoring via Vivino…", i, len(upcoming), len(products), release_date)
-            wines = rank_release(products, client)
-            log.info("[%d/%d] Scored %d/%d wines for %s, saving to DB.", i, len(upcoming), len(wines), len(products), release_date)
-            if wines:
+
+            if wines := rank_release(products, client):
                 db.save_release_wines(conn, release_date, wines)
-        except Exception as e:
-            log.error("[%d/%d] Prefetch failed for %s: %s", i, len(upcoming), release_date, e)
+
+        except Exception:
+            log.exception("Prefetch failed for release date: %s", release_date)
 
 
-def check_and_notify(conn: psycopg.Connection, client: httpx.Client, release_date: date) -> bool:
-    """Return True if a release was found and notifications sent."""
+def check_and_notify(conn: psycopg.Connection) -> bool:
+    """Return True if a release was found for tomorrow and notifications sent."""
+    release_date = date.today() + timedelta(1)
+
     if not db.is_upcoming_release_date(conn, release_date):
-        log.info("No release on %s, exiting quietly.", release_date)
         return False
 
     if db.is_release_seen(conn, release_date):
-        log.info("Release %s already notified, skipping.", release_date)
         return False
 
-    cached = db.get_release_wines(conn, release_date)
-    if not cached:
-        log.warning("Release on %s but no cached wines — skipping notification.", release_date)
+    release_wines = db.get_release_wines(conn, release_date)
+
+    if not release_wines:
         return False
 
     wines = [
         RankedWine(
-            rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+            rank=r[0],name=r[1], score=r[2], vivino_url=r[3],
             sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
         )
-        for r in cached
+        for r in release_wines
     ]
 
     subscribers = db.get_subscribers(conn)
     log.info("Sending to %d subscribers.", len(subscribers))
 
-    from klunkar.telegram import send_message  # avoid circular import at module level
-
-    failed = 0
     for chat_id, max_price in subscribers:
         try:
             send_message(chat_id, format_message(wines, release_date, max_price=max_price))
         except Exception as e:
             log.error("Failed to send to %d: %s", chat_id, e)
-            failed += 1
 
     db.mark_release_seen(conn, release_date, len(wines))
-    log.info("Done. Sent to %d/%d subscribers.", len(subscribers) - failed, len(subscribers))
     return True
