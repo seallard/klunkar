@@ -1,3 +1,0 @@
-[deploy]
-startCommand = "klunkar bot"
-preDeployCommand = "klunkar migrate"
