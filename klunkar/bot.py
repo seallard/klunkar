@@ -199,4 +199,5 @@ def run() -> None:
                         _handle_update(update, conn, client)
                     except Exception as e:
                         log.error("Error handling update %s: %s", update.get("update_id"), e)
+                        conn.rollback()
                     offset = update["update_id"] + 1
