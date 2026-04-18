@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 
@@ -44,9 +44,14 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
         new = db.add_subscriber(conn, chat_id)
         send_message(chat_id, _WELCOME)
         if new:
-            result = db.get_last_release_wines(conn, max_age_days=None)
-            if result:
-                release_date, rows = result
+            tomorrow = date.today() + timedelta(days=1)
+            rows = db.get_release_wines(conn, tomorrow)
+            release_date = tomorrow if rows else None
+            if not rows:
+                result = db.get_last_release_wines(conn, max_age_days=None)
+                if result:
+                    release_date, rows = result
+            if rows:
                 wines = [
                     RankedWine(
                         rank=r[0],
