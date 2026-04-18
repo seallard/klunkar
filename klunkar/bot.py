@@ -1,11 +1,11 @@
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date
 
 import httpx
 
 from klunkar import config, db, systembolaget
-from klunkar.release import RankedWine, _escape, _resolve_apim_key, _sv_date, format_message
+from klunkar.release import RankedWine, _escape, _sv_date, format_message
 from klunkar.telegram import send_message
 
 log = logging.getLogger(__name__)
@@ -77,6 +77,20 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
             max_price = None
             db.set_subscriber_budget(conn, chat_id, None)
             send_message(chat_id, "Budget borttagen \\— du får nu alla tio bästa vinerna\\.")
+        preview_date = db.get_subscriber_preview_date(conn, chat_id)
+        if preview_date:
+            rows = db.get_release_wines(conn, preview_date)
+            if rows:
+                wines = [
+                    RankedWine(
+                        rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
+                        sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
+                    )
+                    for r in rows
+                ]
+                send_message(chat_id, format_message(wines, preview_date, max_price=max_price))
+                log.info("/budget from %d", chat_id)
+                return
         result = db.get_last_release_wines(conn, max_age_days=None)
         if result:
             release_date, rows = result
@@ -100,12 +114,9 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
                 return
         else:
             try:
-                key = _resolve_apim_key(conn, client)
-                upcoming = systembolaget.fetch_upcoming_release_dates(
-                    date.today(), date.today() + timedelta(days=90), key, client
-                )
+                upcoming = systembolaget.scrape_release_dates(client)
             except Exception as e:
-                log.error("Failed to fetch upcoming dates for preview: %s", e)
+                log.error("Failed to scrape release dates for preview: %s", e)
                 send_message(chat_id, "Kunde inte hämta kommande släpp just nu\\.")
                 return
             if not upcoming:
@@ -128,6 +139,7 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
             for r in rows
         ]
         max_price = db.get_subscriber_budget(conn, chat_id)
+        db.set_subscriber_preview_date(conn, chat_id, target)
         send_message(chat_id, format_message(wines, target, max_price=max_price))
         log.info("/preview %s from %d", target, chat_id)
 

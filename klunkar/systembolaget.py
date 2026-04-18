@@ -11,10 +11,22 @@ log = logging.getLogger(__name__)
 _APIM_HEADER = "Ocp-Apim-Subscription-Key"
 _SEARCH_URL = "https://api-extern.systembolaget.se/sb-api-ecommerce/v1/productsearch/search"
 _SB_PRODUCT_URL = "https://www.systembolaget.se/produkt/vin/{name_slug}-{product_id}/"
+_CALENDAR_URL = "https://www.systembolaget.se/nytt/om-vara-nyheter/lanseringar/"
 
 # Chunk of Systembolaget's Next.js JS to extract APIM key from
 _APIM_KEY_RE = re.compile(r"['\"]([0-9a-f]{32})['\"]")
 _NEXT_CHUNK_RE = re.compile(r'src="(/_next/static/chunks/[^"]+\.js)"')
+
+_HREF_DATE_RE = re.compile(r"saljstart-fran=(\d{4}-\d{2}-\d{2})")
+_SV_DATE_RE = re.compile(
+    r"\b(\d{1,2})\s+(januari|februari|mars|april|maj|juni|juli|augusti|september|oktober|november|december)\b",
+    re.IGNORECASE,
+)
+_SV_MONTHS = {
+    "januari": 1, "februari": 2, "mars": 3, "april": 4,
+    "maj": 5, "juni": 6, "juli": 7, "augusti": 8,
+    "september": 9, "oktober": 10, "november": 11, "december": 12,
+}
 
 
 @dataclass
@@ -46,6 +58,29 @@ def scrape_apim_key(client: httpx.Client) -> str:
             log.info("Scraped APIM key: %s…", key[:8])
             return key
     raise RuntimeError("Could not scrape APIM key from Systembolaget JS bundles")
+
+
+def scrape_release_dates(client: httpx.Client) -> list[date]:
+    """Scrape upcoming tillfälligt sortiment release dates from the official calendar page."""
+    r = client.get(_CALENDAR_URL, follow_redirects=True)
+    r.raise_for_status()
+    html = r.text
+    today = date.today()
+    dates: set[date] = set()
+
+    for m in _HREF_DATE_RE.finditer(html):
+        dates.add(date.fromisoformat(m.group(1)))
+
+    for m in _SV_DATE_RE.finditer(html):
+        day = int(m.group(1))
+        month = _SV_MONTHS[m.group(2).lower()]
+        year = today.year if month >= today.month else today.year + 1
+        try:
+            dates.add(date(year, month, day))
+        except ValueError:
+            pass
+
+    return sorted(d for d in dates if d >= today)
 
 
 def _headers(apim_key: str) -> dict:
@@ -122,7 +157,7 @@ def fetch_upcoming_release_dates(
         "categoryLevel1": "Vin",
         "page": 1,
     }
-    dates: set[date] = set()
+    counts: dict[date, int] = {}
     total_pages = 1
     while params["page"] <= total_pages:
         r = client.get(_SEARCH_URL, params=params, headers=_headers(apim_key))
@@ -136,9 +171,9 @@ def fetch_upcoming_release_dates(
             if launch:
                 d = date.fromisoformat(launch[:10])
                 if from_date <= d <= to_date:
-                    dates.add(d)
+                    counts[d] = counts.get(d, 0) + 1
         params["page"] += 1
-    return sorted(dates)
+    return sorted(d for d, count in counts.items() if count >= 10)
 
 
 def has_release(release_date: date, apim_key: str, client: httpx.Client) -> bool:
