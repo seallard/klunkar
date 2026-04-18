@@ -16,27 +16,37 @@ _USER_AGENTS = [
     (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Chrome/135.0.0.0 Safari/537.36",
+        '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "macOS",
     ),
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/123.0.0.0 Safari/537.36"
+        "Chrome/134.0.0.0 Safari/537.36",
+        '"Google Chrome";v="134", "Not-A.Brand";v="8", "Chromium";v="134"',
+        "Windows",
     ),
     (
         "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
+        "Chrome/133.0.0.0 Safari/537.36",
+        '"Google Chrome";v="133", "Not-A.Brand";v="8", "Chromium";v="133"',
+        "Linux",
     ),
     (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) "
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) "
         "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-        "Version/17.4 Safari/605.1.15"
+        "Version/18.3 Safari/605.1.15",
+        None,
+        "macOS",
     ),
     (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+        "Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0",
+        '"Microsoft Edge";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "Windows",
     ),
 ]
 _REQUEST_DELAY_RANGE = (0.5, 2.0)
@@ -77,12 +87,44 @@ def _slug_candidates(producer: str) -> list[str]:
     return list(dict.fromkeys(s for s in slugs if s))
 
 
-def _next_headers() -> dict:
-    return {
-        "User-Agent": random.choice(_USER_AGENTS),
+def prime_session(client: httpx.Client) -> None:
+    ua, sec_ch_ua, platform = random.choice(_USER_AGENTS)
+    headers = {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.vivino.com/",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
     }
+    if sec_ch_ua:
+        headers["sec-ch-ua"] = sec_ch_ua
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = f'"{platform}"'
+    try:
+        client.get("https://www.vivino.com/", headers=headers, timeout=15)
+        log.debug("Vivino session primed.")
+    except Exception as e:
+        log.warning("Failed to prime Vivino session: %s", e)
+
+
+def _next_headers(slug: str) -> dict:
+    ua, sec_ch_ua, platform = random.choice(_USER_AGENTS)
+    headers = {
+        "User-Agent": ua,
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": f"https://www.vivino.com/wineries/{slug}",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    }
+    if sec_ch_ua:
+        headers["sec-ch-ua"] = sec_ch_ua
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = f'"{platform}"'
+    return headers
 
 
 def _fetch_wines(
@@ -94,7 +136,7 @@ def _fetch_wines(
     for attempt in range(_MAX_RETRIES):
         time.sleep(random.uniform(*_REQUEST_DELAY_RANGE))
         try:
-            r = client.get(url, headers=_next_headers(), timeout=10)
+            r = client.get(url, headers=_next_headers(slug), timeout=10)
         except httpx.RequestError as e:
             log.warning("Vivino request failed for %s: %s", slug, e)
             cache[slug] = None
@@ -103,7 +145,8 @@ def _fetch_wines(
             cache[slug] = None
             return None
         if r.status_code == 403:
-            log.warning("Vivino 403 for %s (attempt %d/%d), backing off…", slug, attempt + 1, _MAX_RETRIES)
+            log.warning("Vivino 403 for %s (attempt %d/%d), re-priming session…", slug, attempt + 1, _MAX_RETRIES)
+            prime_session(client)
             time.sleep(random.uniform(*_RETRY_DELAY_RANGE))
             continue
         if r.status_code != 200:

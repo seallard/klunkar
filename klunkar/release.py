@@ -53,6 +53,7 @@ def _fetch_with_key_refresh(
 def rank_release(products: list[systembolaget.SBProduct], client: httpx.Client) -> list[RankedWine]:
     matches: list[tuple[systembolaget.SBProduct, vivino.VivinoMatch]] = []
     vivino_cache: dict = {}
+    vivino.prime_session(client)
 
     for product in products:
         match = vivino.lookup(product.producer, product.name, client, vivino_cache)
