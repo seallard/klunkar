@@ -44,13 +44,28 @@ _RETRY_DELAY_RANGE = (8.0, 20.0)
 _MAX_RETRIES = 2
 
 _STRIP_PREFIXES = re.compile(
-    r"^(bodegas?|weingut|weinguter|domaines?|chateaux?|quinta|tenuta|fattoria|maison|cantina|caves?)\s+",
+    r"^(bodegas?|weingut|weinguter|domaines?|chateaux?|quinta|tenuta|fattoria|maison|cantina|caves?"
+    r"|poderi(\s+e\s+cantine)?|e\s+cantine)\s+",
     re.IGNORECASE,
 )
 _STRIP_SUFFIXES = re.compile(
-    r"\s+(winery|estate|estates|vineyard|vineyards|wines|viticultore|viticultori|wine\s+company.*|ltd\.?|lda\.?)$",
+    r"\s+(winery|estate|estates|vineyard|vineyards|wines?|viticultore|viticultori|wine\s+company.*"
+    r"|family|gmbh|sas|wein|ltd\.?|lda\.?)$",
     re.IGNORECASE,
+
+
 )
+
+
+def _strip_name(s: str) -> str:
+    """Iteratively strip common prefixes and suffixes until stable."""
+    while True:
+        s2 = _STRIP_PREFIXES.sub("", s).strip()
+        s2 = _STRIP_SUFFIXES.sub("", s2).strip()
+        if s2 == s:
+            break
+        s = s2
+    return s
 
 
 @dataclass
@@ -69,11 +84,22 @@ def _slugify(name: str) -> str:
     return re.sub(r"\s+", "-", cleaned.strip())
 
 
+_GENERIC_WORDS = {
+    "domaine", "chateau", "château", "bodega", "bodegas", "weingut", "quinta",
+    "tenuta", "fattoria", "maison", "cantina", "cave", "caves", "poderi", "domaines",
+}
+
+
 def _slug_candidates(producer: str) -> list[str]:
-    no_prefix = _STRIP_PREFIXES.sub("", producer).strip()
-    no_suffix = _STRIP_SUFFIXES.sub("", producer).strip()
-    no_both = _STRIP_SUFFIXES.sub("", no_prefix).strip()
-    slugs = (_slugify(v) for v in (producer, no_prefix, no_suffix, no_both))
+    stripped = _strip_name(producer)
+    candidates = [producer, stripped]
+    # For long company names (e.g. "Valdisole sas Società Agricola di Amato Giuseppe"),
+    # also try just the first word as a fallback, unless it's a generic winery word.
+    words = producer.split()
+    first = words[0].lower()
+    if len(words) >= 4 and first not in _GENERIC_WORDS:
+        candidates.append(words[0])
+    slugs = (_slugify(v) for v in candidates)
     return list(dict.fromkeys(s for s in slugs if s))
 
 
