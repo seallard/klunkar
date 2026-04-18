@@ -139,7 +139,7 @@ def _handle_update(update: dict, conn, client: httpx.Client) -> None:
         else:
             lines = ["*Kommande släpp:*", ""]
             for d in dates:
-                lines.append(f"• {_escape(_sv_date(d))}")
+                lines.append(f"• {d.isoformat()}")
             send_message(chat_id, "\n".join(lines))
         log.info("/releases from %d", chat_id)
 
