@@ -134,7 +134,9 @@ def fetch_upcoming_release_dates(
         for p in data.get("products", []):
             launch = p.get("productLaunchDate")
             if launch:
-                dates.add(date.fromisoformat(launch[:10]))
+                d = date.fromisoformat(launch[:10])
+                if from_date <= d <= to_date:
+                    dates.add(d)
         params["page"] += 1
     return sorted(dates)
 
