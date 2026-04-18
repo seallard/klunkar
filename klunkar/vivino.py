@@ -33,7 +33,7 @@ _USER_AGENTS = [
         "Version/17.4 Safari/605.1.15"
     ),
 ]
-_REQUEST_DELAY = 1.0  # seconds between requests
+_REQUEST_DELAY = 0.3  # seconds between requests
 _RETRY_DELAY = 10.0   # seconds to wait before retrying after a 403
 _MAX_RETRIES = 2
 
