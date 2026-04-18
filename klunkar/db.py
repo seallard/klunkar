@@ -167,6 +167,7 @@ def get_last_release_wines(
                 """
                 SELECT release_date FROM seen_releases
                 WHERE release_date >= CURRENT_DATE - %s
+                  AND release_date <= CURRENT_DATE
                 ORDER BY release_date DESC
                 LIMIT 1
                 """,
@@ -174,7 +175,12 @@ def get_last_release_wines(
             )
         else:
             cur.execute(
-                "SELECT release_date FROM seen_releases ORDER BY release_date DESC LIMIT 1"
+                """
+                SELECT release_date FROM seen_releases
+                WHERE release_date <= CURRENT_DATE
+                ORDER BY release_date DESC
+                LIMIT 1
+                """
             )
         row = cur.fetchone()
         if not row:
