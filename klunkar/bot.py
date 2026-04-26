@@ -44,6 +44,112 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
     return r.json().get("result", [])
 
 
+def _handle_start(chat_id: int, conn: psycopg.Connection) -> None:
+    new = db.add_subscriber(conn, chat_id)
+    send_message(chat_id, _WELCOME)
+    if new:
+        tomorrow = date.today() + timedelta(days=1)
+        rows = db.get_release_wines(conn, tomorrow)
+        release_date = tomorrow if rows else None
+        if not rows:
+            result = db.get_last_release_wines(conn, max_age_days=None)
+            if result:
+                release_date, rows = result
+        if rows:
+            max_price = db.get_subscriber_budget(conn, chat_id)
+            send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
+    log.info("/start from %d (new=%s)", chat_id, new)
+
+
+def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split()
+    if len(parts) >= 2:
+        try:
+            max_price = float(parts[1])
+            db.set_subscriber_budget(conn, chat_id, max_price)
+            send_message(chat_id, f"Budget satt till {int(max_price)} kr\\.")
+        except ValueError:
+            send_message(chat_id, "Ange ett giltigt belopp, t\\.ex\\. /budget 150\\.")
+            return
+    else:
+        max_price = None
+        db.set_subscriber_budget(conn, chat_id, None)
+        send_message(chat_id, "Budget borttagen \\— du får nu alla tio bästa vinerna\\.")
+    preview_date = db.get_subscriber_preview_date(conn, chat_id)
+    if preview_date:
+        rows = db.get_release_wines(conn, preview_date)
+        if rows:
+            send_message(chat_id, format_message(_wines_from_rows(rows), preview_date, max_price=max_price))
+            log.info("/budget from %d", chat_id)
+            return
+    result = db.get_last_release_wines(conn, max_age_days=None)
+    if result:
+        release_date, rows = result
+        send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
+    log.info("/budget from %d", chat_id)
+
+
+def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split()
+    if len(parts) >= 2:
+        try:
+            target = date.fromisoformat(parts[1])
+        except ValueError:
+            send_message(chat_id, "Ange ett datum, t\\.ex\\. /preview 2026\\-05\\-08\\.")
+            return
+    else:
+        upcoming = db.get_upcoming_release_dates(conn, date.today())
+        if not upcoming:
+            send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
+            return
+        target = upcoming[0]
+
+    rows = db.get_release_wines(conn, target)
+    if rows is None:
+        send_message(
+            chat_id,
+            f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
+        )
+        return
+    max_price = db.get_subscriber_budget(conn, chat_id)
+    db.set_subscriber_preview_date(conn, chat_id, target)
+    send_message(chat_id, format_message(_wines_from_rows(rows), target, max_price=max_price))
+    log.info("/preview %s from %d", target, chat_id)
+
+
+def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
+    dates = db.get_upcoming_release_dates(conn, date.today())
+    if not dates:
+        send_message(chat_id, "Inga kommande släpp hittades\\.")
+    else:
+        lines = ["*Kommande släpp*", ""]
+        for d in dates:
+            lines.append(f"• {_escape(_sv_date(d))}")
+        send_message(chat_id, "\n".join(lines))
+    log.info("/releases from %d", chat_id)
+
+
+def _handle_help(chat_id: int) -> None:
+    send_message(
+        chat_id,
+        "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets tillfälliga sortiment\\.\n\n"
+        "*/start* — prenumerera\n"
+        "*/stop* — avsluta\n"
+        "*/releases* — kommande släpp\n"
+        "*/preview* — visa viner för nästa släpp\n"
+        "*/preview 2026\\-05\\-08* — visa viner för ett specifikt datum\n"
+        "*/budget 150* — visa viner under 150 kr\n"
+        "*/budget* — ta bort budgetfilter",
+    )
+    log.info("/help from %d", chat_id)
+
+
+def _handle_stop(chat_id: int, conn: psycopg.Connection) -> None:
+    removed = db.remove_subscriber(conn, chat_id)
+    send_message(chat_id, "Du är nu avprenumererad\\. Skriv /start för att prenumerera igen\\.")
+    log.info("/stop from %d (removed=%s)", chat_id, removed)
+
+
 def _handle_update(update: dict, conn: psycopg.Connection) -> None:
     msg = update.get("message", {})
     text = msg.get("text", "")
@@ -52,104 +158,17 @@ def _handle_update(update: dict, conn: psycopg.Connection) -> None:
         return
 
     if text.startswith("/start"):
-        new = db.add_subscriber(conn, chat_id)
-        send_message(chat_id, _WELCOME)
-        if new:
-            tomorrow = date.today() + timedelta(days=1)
-            rows = db.get_release_wines(conn, tomorrow)
-            release_date = tomorrow if rows else None
-            if not rows:
-                result = db.get_last_release_wines(conn, max_age_days=None)
-                if result:
-                    release_date, rows = result
-            if rows:
-                max_price = db.get_subscriber_budget(conn, chat_id)
-                send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
-        log.info("/start from %d (new=%s)", chat_id, new)
-
+        _handle_start(chat_id, conn)
     elif text.startswith("/budget"):
-        parts = text.split()
-        if len(parts) >= 2:
-            try:
-                max_price = float(parts[1])
-                db.set_subscriber_budget(conn, chat_id, max_price)
-                send_message(chat_id, f"Budget satt till {int(max_price)} kr\\.")
-            except ValueError:
-                send_message(chat_id, "Ange ett giltigt belopp, t\\.ex\\. /budget 150\\.")
-                return
-        else:
-            max_price = None
-            db.set_subscriber_budget(conn, chat_id, None)
-            send_message(chat_id, "Budget borttagen \\— du får nu alla tio bästa vinerna\\.")
-        preview_date = db.get_subscriber_preview_date(conn, chat_id)
-        if preview_date:
-            rows = db.get_release_wines(conn, preview_date)
-            if rows:
-                send_message(chat_id, format_message(_wines_from_rows(rows), preview_date, max_price=max_price))
-                log.info("/budget from %d", chat_id)
-                return
-        result = db.get_last_release_wines(conn, max_age_days=None)
-        if result:
-            release_date, rows = result
-            send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
-        log.info("/budget from %d", chat_id)
-
+        _handle_budget(chat_id, text, conn)
     elif text.startswith("/preview"):
-        parts = text.split()
-        if len(parts) >= 2:
-            try:
-                target = date.fromisoformat(parts[1])
-            except ValueError:
-                send_message(chat_id, "Ange ett datum, t\\.ex\\. /preview 2026\\-05\\-08\\.")
-                return
-        else:
-            upcoming = db.get_upcoming_release_dates(conn, date.today())
-            if not upcoming:
-                send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
-                return
-            target = upcoming[0]
-
-        rows = db.get_release_wines(conn, target)
-        if rows is None:
-            send_message(
-                chat_id,
-                f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
-            )
-            return
-        max_price = db.get_subscriber_budget(conn, chat_id)
-        db.set_subscriber_preview_date(conn, chat_id, target)
-        send_message(chat_id, format_message(_wines_from_rows(rows), target, max_price=max_price))
-        log.info("/preview %s from %d", target, chat_id)
-
+        _handle_preview(chat_id, text, conn)
     elif text.startswith("/releases"):
-        dates = db.get_upcoming_release_dates(conn, date.today())
-        if not dates:
-            send_message(chat_id, "Inga kommande släpp hittades\\.")
-        else:
-            lines = ["*Kommande släpp:*", ""]
-            for d in dates:
-                lines.append(f"• {_escape(_sv_date(d))}")
-            send_message(chat_id, "\n".join(lines))
-        log.info("/releases from %d", chat_id)
-
+        _handle_releases(chat_id, conn)
     elif text.startswith("/help"):
-        send_message(
-            chat_id,
-            "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets tillfälliga sortiment\\.\n\n"
-            "*/start* — prenumerera\n"
-            "*/stop* — avsluta\n"
-            "*/releases* — kommande släpp\n"
-            "*/preview* — visa viner för nästa släpp\n"
-            "*/preview 2026\\-05\\-08* — visa viner för ett specifikt datum\n"
-            "*/budget 150* — visa viner under 150 kr\n"
-            "*/budget* — ta bort budgetfilter",
-        )
-        log.info("/help from %d", chat_id)
-
+        _handle_help(chat_id)
     elif text.startswith("/stop"):
-        removed = db.remove_subscriber(conn, chat_id)
-        send_message(chat_id, "Du är nu avprenumererad\\. Skriv /start för att prenumerera igen\\.")
-        log.info("/stop from %d (removed=%s)", chat_id, removed)
+        _handle_stop(chat_id, conn)
 
 
 def run() -> None:

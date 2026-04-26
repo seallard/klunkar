@@ -17,5 +17,11 @@ dependencies = [
 [project.scripts]
 klunkar = "klunkar.cli:app"
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+markers = ["live: make real network requests; opt-in with -m live"]
+
 [tool.ruff]
 line-length = 100
