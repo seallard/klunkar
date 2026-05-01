@@ -7,7 +7,7 @@ import psycopg
 from psycopg.types.json import Jsonb
 
 from klunkar import config
-from klunkar.models import Wine
+from klunkar.models import Source, Subscriber, Wine
 from klunkar.sources.base import EnrichmentResult
 
 
@@ -18,7 +18,7 @@ def get_conn():
 
 
 def migrate(conn: psycopg.Connection) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS subscribers (
                 chat_id          BIGINT PRIMARY KEY,
@@ -113,7 +113,6 @@ def migrate(conn: psycopg.Connection) -> None:
                 fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
-    conn.commit()
 
 
 # ---- APIM key (unchanged) -----------------------------------------------
@@ -126,7 +125,7 @@ def get_apim_key(conn: psycopg.Connection) -> str | None:
 
 
 def set_apim_key(conn: psycopg.Connection, key: str) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO apim_key (id, key, updated_at)
@@ -135,7 +134,6 @@ def set_apim_key(conn: psycopg.Connection, key: str) -> None:
             """,
             (key,),
         )
-    conn.commit()
 
 
 # ---- Releases (seen / upcoming) -----------------------------------------
@@ -147,7 +145,7 @@ def is_release_seen(conn: psycopg.Connection, release_date: date) -> bool:
 
 
 def mark_release_seen(conn: psycopg.Connection, release_date: date, wine_count: int) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO seen_releases (release_date, wine_count)
@@ -156,7 +154,6 @@ def mark_release_seen(conn: psycopg.Connection, release_date: date, wine_count: 
             """,
             (release_date, wine_count),
         )
-    conn.commit()
 
 
 def has_notified_subscriber(conn: psycopg.Connection, release_date: date, chat_id: int) -> bool:
@@ -169,7 +166,7 @@ def has_notified_subscriber(conn: psycopg.Connection, release_date: date, chat_i
 
 
 def mark_notified_subscriber(conn: psycopg.Connection, release_date: date, chat_id: int) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO notified_subscribers (release_date, chat_id)
@@ -178,16 +175,14 @@ def mark_notified_subscriber(conn: psycopg.Connection, release_date: date, chat_
             """,
             (release_date, chat_id),
         )
-    conn.commit()
 
 
 def save_release_dates(conn: psycopg.Connection, dates: list[date]) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO upcoming_release_dates (release_date) VALUES (%s) ON CONFLICT DO NOTHING",
             [(d,) for d in dates],
         )
-    conn.commit()
 
 
 def is_upcoming_release_date(conn: psycopg.Connection, release_date: date) -> bool:
@@ -212,7 +207,7 @@ def get_upcoming_release_dates(conn: psycopg.Connection, from_date: date) -> lis
 def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
     if not wines:
         return
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             """
             INSERT INTO wines
@@ -234,7 +229,6 @@ def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
                 for w in wines
             ],
         )
-    conn.commit()
 
 
 def has_wines_for(conn: psycopg.Connection, release_date: date) -> bool:
@@ -264,12 +258,13 @@ def get_wines(conn: psycopg.Connection, release_date: date) -> list[Wine]:
 def upsert_enrichments(
     conn: psycopg.Connection,
     release_date: date,
-    source: str,
+    source: Source | str,
     results: list[EnrichmentResult],
 ) -> None:
     if not results:
         return
-    with conn.cursor() as cur:
+    source_value = str(Source(source))
+    with conn.transaction(), conn.cursor() as cur:
         cur.executemany(
             """
             INSERT INTO wine_enrichments
@@ -281,29 +276,27 @@ def upsert_enrichments(
                 fetched_at = now()
             """,
             [
-                (release_date, r.sb_product_number, source, r.confidence, Jsonb(r.payload))
+                (release_date, r.sb_product_number, source_value, r.confidence, Jsonb(r.payload))
                 for r in results
             ],
         )
-    conn.commit()
 
 
 def record_enrichment_run(
-    conn: psycopg.Connection, release_date: date, source: str, matched: int, total: int
+    conn: psycopg.Connection, release_date: date, source: Source | str, matched: int, total: int
 ) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO enrichment_runs (release_date, source, matched_count, total_count)
             VALUES (%s, %s, %s, %s)
             """,
-            (release_date, source, matched, total),
+            (release_date, str(Source(source)), matched, total),
         )
-    conn.commit()
 
 
 def get_last_run(
-    conn: psycopg.Connection, release_date: date, source: str
+    conn: psycopg.Connection, release_date: date, source: Source | str
 ) -> tuple[datetime, int] | None:
     with conn.cursor() as cur:
         cur.execute(
@@ -312,7 +305,7 @@ def get_last_run(
             WHERE release_date = %s AND source = %s
             ORDER BY run_at DESC LIMIT 1
             """,
-            (release_date, source),
+            (release_date, str(Source(source))),
         )
         row = cur.fetchone()
         return (row[0], row[1]) if row else None
@@ -363,56 +356,19 @@ def get_available_sources_for(conn: psycopg.Connection, release_date: date) -> l
         return [r[0] for r in cur.fetchall()]
 
 
-# ---- Subscribers --------------------------------------------------------
-
-def get_subscribers(
-    conn: psycopg.Connection,
-) -> list[tuple[int, float | None, str, list[str] | None]]:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT chat_id, max_price, rank_source, value_filter FROM subscribers"
-        )
-        return cur.fetchall()
-
-
-def get_subscribers_to_notify_for(
-    conn: psycopg.Connection, release_date: date
-) -> list[tuple[int, float | None, str, list[str] | None]]:
-    """Subscribers who joined before `release_date` and haven't been notified for it.
-
-    Excludes recently-joined subscribers — they were not eligible at the original
-    notification window, and `_handle_start` already sent them the most recent release.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT s.chat_id, s.max_price, s.rank_source, s.value_filter
-            FROM subscribers s
-            WHERE s.created_at < %s
-              AND NOT EXISTS (
-                  SELECT 1 FROM notified_subscribers n
-                  WHERE n.release_date = %s AND n.chat_id = s.chat_id
-              )
-            """,
-            (release_date, release_date),
-        )
-        return cur.fetchall()
-
-
 def wipe_release(conn: psycopg.Connection, release_date: date) -> tuple[int, int]:
     """Delete wines (cascades to wine_enrichments) and enrichment_runs for a date.
 
     Preserves notified_subscribers and seen_releases so re-fetching does not
     trigger re-notifications. Returns (wines_deleted, runs_deleted).
     """
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM wines WHERE release_date = %s", (release_date,))
         wines_deleted = cur.rowcount
         cur.execute(
             "DELETE FROM enrichment_runs WHERE release_date = %s", (release_date,)
         )
         runs_deleted = cur.rowcount
-    conn.commit()
     return wines_deleted, runs_deleted
 
 
@@ -432,6 +388,44 @@ def get_past_release_dates_with_data(
         return [r[0] for r in cur.fetchall()]
 
 
+# ---- Subscribers --------------------------------------------------------
+
+def _row_to_subscriber(row: tuple) -> Subscriber:
+    return Subscriber(
+        chat_id=row[0], max_price=row[1], rank_source=row[2], value_filter=row[3],
+    )
+
+
+def get_subscribers(conn: psycopg.Connection) -> list[Subscriber]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT chat_id, max_price, rank_source, value_filter FROM subscribers")
+        return [_row_to_subscriber(r) for r in cur.fetchall()]
+
+
+def get_subscribers_to_notify_for(
+    conn: psycopg.Connection, release_date: date
+) -> list[Subscriber]:
+    """Subscribers who joined before `release_date` and haven't been notified for it.
+
+    Excludes recently-joined subscribers — they were not eligible at the original
+    notification window, and `_handle_start` already sent them the most recent release.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT s.chat_id, s.max_price, s.rank_source, s.value_filter
+            FROM subscribers s
+            WHERE s.created_at < %s
+              AND NOT EXISTS (
+                  SELECT 1 FROM notified_subscribers n
+                  WHERE n.release_date = %s AND n.chat_id = s.chat_id
+              )
+            """,
+            (release_date, release_date),
+        )
+        return [_row_to_subscriber(r) for r in cur.fetchall()]
+
+
 def get_subscriber_budget(conn: psycopg.Connection, chat_id: int) -> float | None:
     with conn.cursor() as cur:
         cur.execute("SELECT max_price FROM subscribers WHERE chat_id = %s", (chat_id,))
@@ -440,28 +434,28 @@ def get_subscriber_budget(conn: psycopg.Connection, chat_id: int) -> float | Non
 
 
 def set_subscriber_budget(conn: psycopg.Connection, chat_id: int, max_price: float | None) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET max_price = %s WHERE chat_id = %s",
             (max_price, chat_id),
         )
-    conn.commit()
 
 
-def get_subscriber_rank_source(conn: psycopg.Connection, chat_id: int) -> str:
+def get_subscriber_rank_source(conn: psycopg.Connection, chat_id: int) -> Source:
     with conn.cursor() as cur:
         cur.execute("SELECT rank_source FROM subscribers WHERE chat_id = %s", (chat_id,))
         row = cur.fetchone()
-        return row[0] if row else "vivino"
+        return Source(row[0]) if row else Source.VIVINO
 
 
-def set_subscriber_rank_source(conn: psycopg.Connection, chat_id: int, source: str) -> None:
-    with conn.cursor() as cur:
+def set_subscriber_rank_source(
+    conn: psycopg.Connection, chat_id: int, source: Source | str
+) -> None:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET rank_source = %s WHERE chat_id = %s",
-            (source, chat_id),
+            (str(Source(source)), chat_id),
         )
-    conn.commit()
 
 
 def get_subscriber_value_filter(
@@ -478,40 +472,34 @@ def set_subscriber_value_filter(
 ) -> None:
     # NULL or empty list both mean "no filter".
     stored = values if values else None
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET value_filter = %s WHERE chat_id = %s",
             (stored, chat_id),
         )
-    conn.commit()
 
 
 def add_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "INSERT INTO subscribers (chat_id) VALUES (%s) ON CONFLICT DO NOTHING",
             (chat_id,),
         )
-        inserted = cur.rowcount == 1
-    conn.commit()
-    return inserted
+        return cur.rowcount == 1
 
 
 def remove_subscriber(conn: psycopg.Connection, chat_id: int) -> bool:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM subscribers WHERE chat_id = %s", (chat_id,))
-        deleted = cur.rowcount == 1
-    conn.commit()
-    return deleted
+        return cur.rowcount == 1
 
 
 def set_subscriber_preview_date(conn: psycopg.Connection, chat_id: int, release_date: date) -> None:
-    with conn.cursor() as cur:
+    with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET last_preview_date = %s WHERE chat_id = %s",
             (release_date, chat_id),
         )
-    conn.commit()
 
 
 def get_subscriber_preview_date(conn: psycopg.Connection, chat_id: int) -> date | None:

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from klunkar import release
+from klunkar.models import Source, Subscriber
 
 
 @pytest.fixture
@@ -79,7 +80,7 @@ def fake_db(monkeypatch):
 
 def test_tomorrow_only_when_no_past_releases(fake_db):
     state, calls = fake_db
-    state["subscribers"] = [(1, None, "vivino", None)]
+    state["subscribers"] = [Subscriber(chat_id=1, rank_source=Source.VIVINO)]
     state["wines"][date.today() + timedelta(1)] = ["a wine"]
     state["wine_count"][date.today() + timedelta(1)] = 5
 
@@ -93,7 +94,7 @@ def test_retro_notifies_eligible_subscriber_for_past_release(fake_db):
     state["is_upcoming_tomorrow"] = False
     past = date.today() - timedelta(3)
     state["past_dates"] = [past]
-    state["past_eligible"][past] = [(42, None, "munskankarna", None)]
+    state["past_eligible"][past] = [Subscriber(chat_id=42, rank_source=Source.MUNSKANKARNA)]
     state["wines"][past] = ["wine"]
     state["wine_count"][past] = 30
 
@@ -106,7 +107,7 @@ def test_retro_skips_when_chosen_source_still_empty(fake_db):
     state["is_upcoming_tomorrow"] = False
     past = date.today() - timedelta(2)
     state["past_dates"] = [past]
-    state["past_eligible"][past] = [(7, None, "munskankarna", None)]
+    state["past_eligible"][past] = [Subscriber(chat_id=7, rank_source=Source.MUNSKANKARNA)]
     # state["wines"][past] is empty → ranking returns []
 
     assert release.check_and_notify(MagicMock()) is False
@@ -122,7 +123,7 @@ def test_retro_does_not_resend_for_already_notified(fake_db):
     state["past_dates"] = [past]
     state["already_notified"].add((past, 99))
     # Even if a subscriber leaks through, has_notified_subscriber blocks it.
-    state["past_eligible"][past] = [(99, None, "vivino", None)]
+    state["past_eligible"][past] = [Subscriber(chat_id=99, rank_source=Source.VIVINO)]
     state["wines"][past] = ["wine"]
 
     assert release.check_and_notify(MagicMock()) is False
@@ -133,12 +134,12 @@ def test_tomorrow_and_retro_both_fire(fake_db):
     tomorrow = date.today() + timedelta(1)
     past = date.today() - timedelta(2)
 
-    state["subscribers"] = [(1, None, "vivino", None)]
+    state["subscribers"] = [Subscriber(chat_id=1, rank_source=Source.VIVINO)]
     state["wines"][tomorrow] = ["wine"]
     state["wine_count"][tomorrow] = 5
 
     state["past_dates"] = [past]
-    state["past_eligible"][past] = [(42, None, "munskankarna", None)]
+    state["past_eligible"][past] = [Subscriber(chat_id=42, rank_source=Source.MUNSKANKARNA)]
     state["wines"][past] = ["wine"]
     state["wine_count"][past] = 30
 

@@ -1,12 +1,14 @@
 import logging
 import sys
 from datetime import date
+from typing import Annotated
 
 import httpx
 import typer
 
 from klunkar import config, db, ranking, release, systembolaget
 from klunkar.bot import parse_category_args, run as run_bot
+from klunkar.models import Source
 from klunkar.sources import ENRICHERS
 
 app = typer.Typer()
@@ -50,19 +52,29 @@ def _resolve_date(conn, release_date: str | None) -> date:
     return upcoming[0]
 
 
+def _resolve_source(name: str) -> Source:
+    try:
+        return Source(name)
+    except ValueError:
+        valid = ", ".join(s.value for s in Source)
+        typer.echo(f"Unknown source '{name}'. Available: {valid}")
+        raise typer.Exit(1)
+
+
 @app.command("enrich")
 def enrich(
-    release_date: str | None = typer.Option(None, "--date"),
-    only: str | None = typer.Option(None, "--source", help="Run only this enricher"),
-    force: bool = typer.Option(False, "--force"),
-    scrape_wines: bool = typer.Option(
-        True, "--scrape/--no-scrape", help="Fetch SB wines if missing"
-    ),
+    release_date: Annotated[str | None, typer.Option("--date")] = None,
+    only: Annotated[
+        str | None, typer.Option("--source", help="Run only this enricher")
+    ] = None,
+    force: Annotated[bool, typer.Option("--force")] = False,
+    scrape_wines: Annotated[
+        bool,
+        typer.Option("--scrape/--no-scrape", help="Fetch SB wines if missing"),
+    ] = True,
 ) -> None:
     """Run enrichers for a release. Useful for poking at sources between scheduled runs."""
-    if only and only not in ENRICHERS:
-        typer.echo(f"Unknown source '{only}'. Available: {', '.join(ENRICHERS)}")
-        raise typer.Exit(1)
+    source = _resolve_source(only) if only else None
 
     with db.get_conn() as conn:
         target = _resolve_date(conn, release_date)
@@ -73,19 +85,19 @@ def enrich(
                 db.upsert_wines(conn, release._wines_from_products(target, products))
                 typer.echo(f"  saved {len(products)} wines")
 
-            summary = release.enrich_release(conn, client, target, only=only, force=force)
+            summary = release.enrich_release(conn, client, target, only=source, force=force)
 
     if not summary:
         typer.echo("No enrichers ran (use --force to override the refresh policy).")
         return
-    for source, (matched, total) in summary.items():
-        typer.echo(f"{source}: {matched}/{total} matched")
+    for src, (matched, total) in summary.items():
+        typer.echo(f"{src}: {matched}/{total} matched")
 
 
 @app.command("refetch")
 def refetch(
-    release_date: str = typer.Argument(..., help="Release date (YYYY-MM-DD) to wipe and re-fetch"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the interactive confirmation"),
+    release_date: Annotated[str, typer.Argument(help="Release date (YYYY-MM-DD) to wipe and re-fetch")],
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the interactive confirmation")] = False,
 ) -> None:
     """Wipe a release and re-fetch from scratch (Systembolaget + all enrichers).
 
@@ -120,22 +132,20 @@ def refetch(
     if not summary:
         typer.echo("No enrichers ran (unexpected after wipe).")
         return
-    for source, (matched, total) in summary.items():
-        typer.echo(f"{source}: {matched}/{total} matched")
+    for src, (matched, total) in summary.items():
+        typer.echo(f"{src}: {matched}/{total} matched")
 
 
 @app.command("preview")
 def preview(
-    release_date: str | None = typer.Argument(None),
-    source: str = typer.Option("vivino", "--source"),
-    category: str | None = typer.Option(
-        None, "--category", help='Comma-separated; e.g. "fynd,prisvärt"'
-    ),
+    release_date: Annotated[str | None, typer.Argument()] = None,
+    source: Annotated[str, typer.Option("--source")] = "vivino",
+    category: Annotated[
+        str | None, typer.Option("--category", help='Comma-separated; e.g. "fynd,prisvärt"')
+    ] = None,
 ) -> None:
     """Dry run: print the ranked wine list for a release date (default: next upcoming)."""
-    if source not in ENRICHERS:
-        typer.echo(f"Unknown source '{source}'. Available: {', '.join(ENRICHERS)}")
-        raise typer.Exit(1)
+    src = _resolve_source(source)
 
     value_set: set[str] | None = None
     if category:
@@ -151,13 +161,13 @@ def preview(
             typer.echo(f"No wines stored for {target} — run enrich/check-release first.")
             raise typer.Exit(1)
         wines = ranking.build_ranked_view(
-            conn, target, source=source, value_ratings=value_set,
+            conn, target, source=src, value_ratings=value_set,
         )
         if not wines:
-            typer.echo(f"No {source}-ranked wines for {target} matching filters.")
+            typer.echo(f"No {src}-ranked wines for {target} matching filters.")
             raise typer.Exit(1)
         typer.echo(release.format_message(
-            wines, target, source=source, value_ratings=value_set,
+            wines, target, source=src, value_ratings=value_set,
         ))
 
 
@@ -172,9 +182,9 @@ def subscribers_list() -> None:
     """List all subscribers."""
     with db.get_conn() as conn:
         subs = db.get_subscribers(conn)
-    for chat_id, max_price, rank_source, value_filter in subs:
-        cats = ",".join(value_filter) if value_filter else "-"
+    for s in subs:
+        cats = ",".join(s.value_filter) if s.value_filter else "-"
         typer.echo(
-            f"{chat_id}\tbudget={max_price}\tsource={rank_source}\tcategory={cats}"
+            f"{s.chat_id}\tbudget={s.max_price}\tsource={s.rank_source}\tcategory={cats}"
         )
     typer.echo(f"Total: {len(subs)}")

@@ -6,7 +6,7 @@ import httpx
 import psycopg
 
 from klunkar import config, db, ranking, systembolaget
-from klunkar.models import RankedWine, Wine
+from klunkar.models import RankedWine, Source, Subscriber, Wine
 from klunkar.sources import ENRICHERS
 from klunkar.telegram import send_message
 
@@ -159,39 +159,39 @@ def enrich_release(
 def _notify_subscribers(
     conn: psycopg.Connection,
     release_date: date,
-    subscribers: list[tuple[int, float | None, str, list[str] | None]],
+    subscribers: list[Subscriber],
     *,
     log_prefix: str = "",
 ) -> int:
     """Send the ranked-view message to each eligible subscriber. Returns send count."""
     sent = 0
-    for chat_id, max_price, rank_source, value_filter in subscribers:
-        if db.has_notified_subscriber(conn, release_date, chat_id):
+    for sub in subscribers:
+        if db.has_notified_subscriber(conn, release_date, sub.chat_id):
             continue
-        value_set = set(value_filter) if value_filter else None
+        value_set = set(sub.value_filter) if sub.value_filter else None
         ranked = ranking.build_ranked_view(
-            conn, release_date, source=rank_source, value_ratings=value_set,
+            conn, release_date, source=sub.rank_source, value_ratings=value_set,
         )
         if not ranked:
             log.info(
                 "%sNo %s-ranked wines for %s — skipping chat %d",
-                log_prefix, rank_source, release_date, chat_id,
+                log_prefix, sub.rank_source, release_date, sub.chat_id,
             )
             continue
         try:
             send_message(
-                chat_id,
+                sub.chat_id,
                 format_message(
                     ranked, release_date,
-                    source=rank_source,
-                    max_price=max_price,
+                    source=sub.rank_source,
+                    max_price=sub.max_price,
                     value_ratings=value_set,
                 ),
             )
-            db.mark_notified_subscriber(conn, release_date, chat_id)
+            db.mark_notified_subscriber(conn, release_date, sub.chat_id)
             sent += 1
         except Exception as e:
-            log.error("%sFailed to send to %d: %s", log_prefix, chat_id, e)
+            log.error("%sFailed to send to %d: %s", log_prefix, sub.chat_id, e)
     return sent
 
 
@@ -253,18 +253,20 @@ def _sv_date(d: date) -> str:
     return f"{d.day} {_MONTHS_SV[d.month - 1]} {d.year}"
 
 
-def _source_label(source: str) -> str:
-    return {"vivino": "Vivino", "munskankarna": "Munskänkarna"}.get(source, source)
+def _source_label(source: Source | str) -> str:
+    enricher = ENRICHERS.get(Source(source))
+    return enricher.display_name if enricher else str(source)
 
 
 def format_message(
     wines: list[RankedWine],
     release_date: date,
     *,
-    source: str,
+    source: Source | str,
     max_price: float | None = None,
     value_ratings: set[str] | None = None,
 ) -> str:
+    source = Source(source)
     if max_price:
         wines = [w for w in wines if (w.wine.price or 0) <= max_price]
     wines = wines[: config.TOP_N]
@@ -299,9 +301,9 @@ def format_message(
 
         # Primary clickable name → primary link of chosen source if present, else SB
         primary_url = wine.sb_url
-        if source == "vivino" and w.vivino:
+        if source is Source.VIVINO and w.vivino:
             primary_url = w.vivino.wine_url
-        elif source == "munskankarna" and w.munskankarna and w.munskankarna.review_url:
+        elif source is Source.MUNSKANKARNA and w.munskankarna and w.munskankarna.review_url:
             primary_url = w.munskankarna.review_url
 
         if score_line:
@@ -313,9 +315,9 @@ def format_message(
         link_chunks: list[str] = []
         price_text = _escape(f"{int(wine.price)} kr") if wine.price else _escape("köp")
         link_chunks.append(f"[{price_text}]({wine.sb_url})")
-        if w.vivino and source != "vivino":
+        if w.vivino and source is not Source.VIVINO:
             link_chunks.append(f"[Vivino]({w.vivino.wine_url})")
-        if w.munskankarna and w.munskankarna.review_url and source != "munskankarna":
+        if w.munskankarna and w.munskankarna.review_url and source is not Source.MUNSKANKARNA:
             link_chunks.append(f"[Munskänkarna]({w.munskankarna.review_url})")
         lines.append("🛒 " + " · ".join(link_chunks))
         lines.append("")

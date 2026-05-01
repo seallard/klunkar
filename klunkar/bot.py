@@ -1,11 +1,13 @@
 import logging
 import time
+from collections.abc import Callable
 from datetime import date, timedelta
 
 import httpx
 import psycopg
 
 from klunkar import config, db, ranking
+from klunkar.models import Source
 from klunkar.release import _escape, _source_label, _sv_date, format_message
 from klunkar.sources import ENRICHERS
 from klunkar.telegram import send_message
@@ -70,7 +72,7 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
 
 
 def _send_ranked(
-    chat_id: int, conn: psycopg.Connection, release_date: date, source: str
+    chat_id: int, conn: psycopg.Connection, release_date: date, source: Source | str
 ) -> bool:
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     value_set = set(value_filter) if value_filter else None
@@ -133,7 +135,6 @@ def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split()
     target = _resolve_active_date(conn)
     available = db.get_available_sources_for(conn, target) if target else []
-    valid = list(ENRICHERS.keys())
 
     if len(parts) < 2:
         current = db.get_subscriber_rank_source(conn, chat_id)
@@ -150,14 +151,12 @@ def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         send_message(chat_id, "\n".join(lines))
         return
 
-    choice = parts[1].strip().lower()
-    if choice not in valid:
-        send_message(
-            chat_id,
-            _escape(
-                f"Okänd källa '{choice}'. Giltiga: {', '.join(valid)}."
-            ),
-        )
+    raw = parts[1].strip().lower()
+    try:
+        choice = Source(raw)
+    except ValueError:
+        valid = ", ".join(s.value for s in Source)
+        send_message(chat_id, _escape(f"Okänd källa '{raw}'. Giltiga: {valid}."))
         return
 
     db.set_subscriber_rank_source(conn, chat_id, choice)
@@ -297,29 +296,28 @@ def _handle_stop(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/stop from %d (removed=%s)", chat_id, removed)
 
 
+_HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
+    "/start":    lambda c, t, conn: _handle_start(c, conn),
+    "/budget":   _handle_budget,
+    "/source":   _handle_source,
+    "/category": _handle_category,
+    "/preview":  _handle_preview,
+    "/releases": lambda c, t, conn: _handle_releases(c, conn),
+    "/help":     lambda c, t, conn: _handle_help(c),
+    "/stop":     lambda c, t, conn: _handle_stop(c, conn),
+}
+
+
 def _handle_update(update: dict, conn: psycopg.Connection) -> None:
     msg = update.get("message", {})
     text = msg.get("text", "")
     chat_id = msg.get("chat", {}).get("id")
     if not chat_id or not text:
         return
-
-    if text.startswith("/start"):
-        _handle_start(chat_id, conn)
-    elif text.startswith("/budget"):
-        _handle_budget(chat_id, text, conn)
-    elif text.startswith("/source"):
-        _handle_source(chat_id, text, conn)
-    elif text.startswith("/category"):
-        _handle_category(chat_id, text, conn)
-    elif text.startswith("/preview"):
-        _handle_preview(chat_id, text, conn)
-    elif text.startswith("/releases"):
-        _handle_releases(chat_id, conn)
-    elif text.startswith("/help"):
-        _handle_help(chat_id)
-    elif text.startswith("/stop"):
-        _handle_stop(chat_id, conn)
+    cmd = text.split(maxsplit=1)[0]
+    handler = _HANDLERS.get(cmd)
+    if handler is not None:
+        handler(chat_id, text, conn)
 
 
 def run() -> None:

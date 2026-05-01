@@ -5,14 +5,14 @@ import httpx
 import psycopg
 
 from klunkar import vivino as _v
-from klunkar.models import VivinoPayload, Wine
+from klunkar.models import Source, VivinoPayload, Wine
 from klunkar.sources.base import EnrichmentResult
 
 log = logging.getLogger(__name__)
 
 
 class VivinoEnricher:
-    name = "vivino"
+    name = Source.VIVINO
     display_name = "Vivino"
 
     def enrich_release(
@@ -23,7 +23,7 @@ class VivinoEnricher:
         conn: psycopg.Connection,
     ) -> list[EnrichmentResult]:
         _v.prime_session(client)
-        cache: dict[str, list | None] = {}
+        cache: dict[str, list[dict] | None] = {}
         results: list[EnrichmentResult] = []
         for w in wines:
             match = _v.lookup(w.producer, w.name, client, cache)

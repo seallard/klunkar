@@ -1,9 +1,17 @@
 from datetime import date
+from enum import StrEnum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+
+class Source(StrEnum):
+    VIVINO = "vivino"
+    MUNSKANKARNA = "munskankarna"
 
 
 class Wine(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     sb_product_number: str
     sb_product_id: str
     release_date: date
@@ -15,6 +23,8 @@ class Wine(BaseModel):
 
 
 class VivinoPayload(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     wine_id: int
     matched_name: str
     ratings_average: float
@@ -23,6 +33,8 @@ class VivinoPayload(BaseModel):
 
 
 class MunskankarnaPayload(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     score: float
     value_rating: str | None = None
     tasting_note: str | None = None
@@ -30,7 +42,18 @@ class MunskankarnaPayload(BaseModel):
 
 
 class RankedWine(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     wine: Wine
     rank_score: float
     vivino: VivinoPayload | None = None
     munskankarna: MunskankarnaPayload | None = None
+
+
+class Subscriber(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    chat_id: int
+    max_price: float | None = None
+    rank_source: Source = Source.VIVINO
+    value_filter: list[str] | None = None

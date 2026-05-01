@@ -1,10 +1,10 @@
 import logging
 import re
 import unicodedata
-from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 log = logging.getLogger(__name__)
 
@@ -22,8 +22,9 @@ _HREF_DATE_RE = re.compile(
 )
 
 
-@dataclass
-class SBProduct:
+class SBProduct(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     product_id: str
     product_number: str
     name: str
@@ -75,7 +76,7 @@ def scrape_release_dates(client: httpx.Client) -> list[date]:
     return sorted(d for d in dates if d >= date.today())
 
 
-def _headers(apim_key: str) -> dict:
+def _headers(apim_key: str) -> dict[str, str]:
     return {_APIM_HEADER: apim_key, "Accept": "application/json"}
 
 

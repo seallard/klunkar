@@ -52,7 +52,11 @@ Schema is recreated by `klunkar migrate` (idempotent). Key tables:
 ## Tech stack
 - Python 3.11+
 - httpx — async HTTP client
-- pydantic — data validation and models
+- pydantic — used for **all internal data shapes** (Wine, Subscriber, source payloads,
+  parse intermediates like SBProduct / VivinoMatch). All value models are frozen
+  (`ConfigDict(frozen=True)`).
+- `klunkar.models.Source` — `StrEnum` for source identifiers; preferred over
+  bare strings everywhere. `StrEnum` preserves wire format, so DB rows stay plain text.
 
 ## Runtime: Railway
 

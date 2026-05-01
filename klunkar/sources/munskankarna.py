@@ -7,7 +7,7 @@ import httpx
 import psycopg
 from bs4 import BeautifulSoup
 
-from klunkar.models import MunskankarnaPayload, Wine
+from klunkar.models import MunskankarnaPayload, Source, Wine
 from klunkar.sources.base import EnrichmentResult
 
 log = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ def _parse(html: str, page_url: str) -> dict[str, MunskankarnaPayload]:
 
 
 class MunskankarnaEnricher:
-    name = "munskankarna"
+    name = Source.MUNSKANKARNA
     display_name = "Munskänkarna"
 
     def enrich_release(

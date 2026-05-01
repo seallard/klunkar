@@ -3,9 +3,9 @@ import random
 import re
 import time
 import unicodedata
-from dataclasses import dataclass
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 from rapidfuzz import fuzz, process
 
 log = logging.getLogger(__name__)
@@ -68,8 +68,9 @@ def _strip_name(s: str) -> str:
     return s
 
 
-@dataclass
-class VivinoMatch:
+class VivinoMatch(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     wine_id: int
     name: str
     ratings_average: float
@@ -117,7 +118,7 @@ def prime_session(client: httpx.Client) -> None:
         log.warning("Failed to prime Vivino session: %s", e)
 
 
-def _next_headers(slug: str) -> dict:
+def _next_headers(slug: str) -> dict[str, str]:
     ua = random.choice(_USER_AGENTS)
     return {
         "User-Agent": ua,
