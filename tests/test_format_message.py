@@ -14,7 +14,7 @@ def _wine(num="1", name="Foo", price=200.0):
     )
 
 
-def test_title_row_carries_sb_price_link_and_wine_glass():
+def test_title_row_is_just_glass_and_name():
     rw = RankedWine(
         wine=_wine(name="Foo", price=149),
         rank_score=4.0,
@@ -22,8 +22,27 @@ def test_title_row_carries_sb_price_link_and_wine_glass():
                              ratings_count=100, wine_url="https://vivino/1"),
     )
     out = format_message([rw], RD, source="vivino")
-    assert "🍷 Foo — [149 kr](https://sb.se/1)" in out
+    assert "🍷 Foo" in out
+    assert "🍷 Foo —" not in out                 # no price/dash on title row
     assert "🥇" not in out and "🥈" not in out and "🥉" not in out
+
+
+def test_systembolaget_renders_as_its_own_labeled_row():
+    rw = RankedWine(
+        wine=_wine(num="1", name="Foo", price=149),
+        rank_score=4.0,
+    )
+    out = format_message([rw], RD, source="vivino")
+    assert "[Systembolaget: 149 kr](https://sb.se/1)" in out
+
+
+def test_systembolaget_row_when_price_missing():
+    rw = RankedWine(
+        wine=_wine(num="1", name="Foo", price=None),
+        rank_score=4.0,
+    )
+    out = format_message([rw], RD, source="vivino")
+    assert "[Systembolaget: köp](https://sb.se/1)" in out
 
 
 def test_each_present_source_renders_its_own_row_with_link():

@@ -284,9 +284,11 @@ def format_message(
         wine = w.wine
         name = _escape(wine.name)
         glass = _WINE_GLASS.get(wine.wine_type or "", _DEFAULT_GLASS)
-        price_text = _escape(f"{int(wine.price)} kr") if wine.price else _escape("köp")
+        lines.append(f"{glass} {name}")
 
-        lines.append(f"{glass} {name} — [{price_text}]({wine.sb_url})")
+        price_text = f"{int(wine.price)} kr" if wine.price else "köp"
+        sb_label = _escape(f"Systembolaget: {price_text}")
+        lines.append(f"[{sb_label}]({wine.sb_url})")
 
         if w.vivino:
             label = _escape(f"Vivino: {w.vivino.ratings_average:.1f} ★")
