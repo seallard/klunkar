@@ -265,6 +265,18 @@ def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     log.info("/preview %s from %d", target, chat_id)
 
 
+def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
+    target = db.get_last_release_with_data(conn)
+    if target is None:
+        send_message(chat_id, "Inga tidigare släpp hittades\\.")
+        return
+
+    source = db.get_subscriber_rank_source(conn, chat_id)
+    if not _send_ranked(chat_id, conn, target, source):
+        send_message(chat_id, _escape(_empty_view_message(target)))
+    log.info("/recent %s from %d", target, chat_id)
+
+
 def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
     dates = db.get_upcoming_release_dates(conn, date.today())
     if not dates:
@@ -315,6 +327,7 @@ def _handle_help(chat_id: int) -> None:
         "*Visa listor*\n"
         "/preview — viner för nästa släpp\n"
         "/preview 2026\\-05\\-08 — viner för ett specifikt datum\n"
+        "/recent — viner från senaste släpp\n"
         "/releases — kommande släpp\n\n"
         "*Filtrera*\n"
         "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
@@ -343,6 +356,7 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/source":   _handle_source,
     "/category": _handle_category,
     "/preview":  _handle_preview,
+    "/recent":   lambda c, t, conn: _handle_recent(c, conn),
     "/releases": lambda c, t, conn: _handle_releases(c, conn),
     "/settings": lambda c, t, conn: _handle_settings(c, conn),
     "/help":     lambda c, t, conn: _handle_help(c),

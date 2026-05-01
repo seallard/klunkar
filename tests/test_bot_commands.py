@@ -139,7 +139,54 @@ def test_empty_view_message_mentions_filters_and_settings():
     assert "24 april 2026" in msg
 
 
+# ---- /recent ------------------------------------------------------------
+
+def test_recent_no_past_release(fake_state, monkeypatch):
+    _, sent = fake_state
+    monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: None)
+
+    bot._handle_recent(789, MagicMock())
+
+    assert any("Inga tidigare släpp" in msg for _, msg in sent)
+
+
+def test_recent_sends_ranked_for_last_release(fake_state, monkeypatch):
+    _, sent = fake_state
+    last = date(2026, 4, 24)
+    monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: last)
+
+    called = {}
+
+    def fake_send_ranked(chat_id, conn, release_date, source):
+        called["args"] = (chat_id, release_date, source)
+        return True
+
+    monkeypatch.setattr(bot, "_send_ranked", fake_send_ranked)
+
+    bot._handle_recent(789, MagicMock())
+
+    assert called["args"] == (789, last, "vivino")
+    # _send_ranked succeeded → no fallback empty-view message
+    assert not any("matchar dina filter" in msg for _, msg in sent)
+
+
+def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
+    _, sent = fake_state
+    last = date(2026, 4, 24)
+    monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: last)
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: False)
+
+    bot._handle_recent(789, MagicMock())
+
+    assert any("matchar dina filter" in msg for _, msg in sent)
+    assert any("24 april 2026" in msg for _, msg in sent)
+
+
 # ---- handler dispatch ---------------------------------------------------
 
 def test_settings_command_is_dispatched():
     assert "/settings" in bot._HANDLERS
+
+
+def test_recent_command_is_dispatched():
+    assert "/recent" in bot._HANDLERS
