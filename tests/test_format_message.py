@@ -14,7 +14,19 @@ def _wine(num="1", name="Foo", price=200.0):
     )
 
 
-def test_vivino_message_uses_vivino_link_and_omits_vivino_in_link_row():
+def test_title_row_carries_sb_price_link_and_wine_glass():
+    rw = RankedWine(
+        wine=_wine(name="Foo", price=149),
+        rank_score=4.0,
+        vivino=VivinoPayload(wine_id=1, matched_name="m", ratings_average=4.3,
+                             ratings_count=100, wine_url="https://vivino/1"),
+    )
+    out = format_message([rw], RD, source="vivino")
+    assert "🍷 Foo — [149 kr](https://sb.se/1)" in out
+    assert "🥇" not in out and "🥈" not in out and "🥉" not in out
+
+
+def test_each_present_source_renders_its_own_row_with_link():
     rw = RankedWine(
         wine=_wine(),
         rank_score=4.0,
@@ -24,25 +36,41 @@ def test_vivino_message_uses_vivino_link_and_omits_vivino_in_link_row():
                                          review_url="https://msk/1"),
     )
     out = format_message([rw], RD, source="vivino")
-    assert "Rankas av Vivino" in out
-    assert "(https://vivino/1)" in out                  # primary link
-    assert "[Munskänkarna](https://msk/1)" in out       # complementary link
-    assert "[Vivino](https://vivino/1)" not in out      # don't double-link primary
+    assert "[Vivino: 4\\.3 ★](https://vivino/1)" in out
+    assert "[Munskänkarna: 17/20 \\(fynd\\)](https://msk/1)" in out
 
 
-def test_munskankarna_message_uses_msk_link_and_shows_value_rating():
+def test_missing_source_skips_its_row():
     rw = RankedWine(
         wine=_wine(),
-        rank_score=17,
-        vivino=None,
-        munskankarna=MunskankarnaPayload(score=17, value_rating="fynd",
-                                         review_url="https://msk/1"),
+        rank_score=4.0,
+        vivino=VivinoPayload(wine_id=1, matched_name="m", ratings_average=4.0,
+                             ratings_count=10, wine_url="https://vivino/1"),
+        munskankarna=None,
+    )
+    out = format_message([rw], RD, source="vivino")
+    assert "Vivino" in out
+    assert "Munskänkarna:" not in out
+
+
+def test_munskankarna_without_review_url_renders_plain_text():
+    rw = RankedWine(
+        wine=_wine(),
+        rank_score=15,
+        munskankarna=MunskankarnaPayload(score=15, value_rating="prisvärt", review_url=None),
     )
     out = format_message([rw], RD, source="munskankarna")
-    assert "Rankas av Munskänkarna" in out
-    assert "(https://msk/1)" in out
-    assert "17/20 Munskänkarna" in out
-    assert "fynd" in out
+    # Plain text, not a link
+    assert "Munskänkarna: 15/20" in out
+    assert "(None)" not in out                 # no None URL leaked
+    assert "[Munskänkarna" not in out          # no link wrapper
+
+
+def test_header_shows_ranking_source():
+    rw = RankedWine(wine=_wine(), rank_score=17,
+                    munskankarna=MunskankarnaPayload(score=17, review_url="https://m/1"))
+    assert "Rankas av Munskänkarna" in format_message([rw], RD, source="munskankarna")
+    assert "Rankas av Vivino" in format_message([rw], RD, source="vivino")
 
 
 def test_budget_filter_drops_expensive_wines():
@@ -67,5 +95,5 @@ def test_markdownv2_escapes_dots_and_parens():
                              ratings_count=10, wine_url="https://v/1"),
     )
     out = format_message([rw], RD, source="vivino")
-    assert "4\\.5" in out                    # decimal escaped
-    assert "Wine 4\\.5" in out                # name escape
+    assert "4\\.5" in out
+    assert "Wine 4\\.5" in out

@@ -240,7 +240,6 @@ _MONTHS_SV = [
     "juli", "augusti", "september", "oktober", "november", "december",
 ]
 
-_MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 _WINE_GLASS = {"Rött vin": "🍷", "Vitt vin": "🥂", "Rosévin": "🌸"}
 _DEFAULT_GLASS = "🍷"
 
@@ -281,45 +280,26 @@ def format_message(
         sub_lines.append(_escape(f"Kategori: {cats}"))
     lines = [header, *sub_lines, ""]
 
-    for i, w in enumerate(wines, start=1):
-        rank = i
+    for w in wines:
         wine = w.wine
         name = _escape(wine.name)
-        medal = _MEDALS.get(rank, "")
-        prefix = medal if medal else _WINE_GLASS.get(wine.wine_type or "", _DEFAULT_GLASS)
-
-        # Score chunks
-        score_chunks: list[str] = []
-        if w.vivino:
-            score_chunks.append(_escape(f"{w.vivino.ratings_average:.1f} ★ Vivino"))
-        if w.munskankarna:
-            msk = f"{w.munskankarna.score:g}/20 Munskänkarna"
-            if w.munskankarna.value_rating:
-                msk += f" ({w.munskankarna.value_rating})"
-            score_chunks.append(_escape(msk))
-        score_line = " · ".join(score_chunks) if score_chunks else ""
-
-        # Primary clickable name → primary link of chosen source if present, else SB
-        primary_url = wine.sb_url
-        if source is Source.VIVINO and w.vivino:
-            primary_url = w.vivino.wine_url
-        elif source is Source.MUNSKANKARNA and w.munskankarna and w.munskankarna.review_url:
-            primary_url = w.munskankarna.review_url
-
-        if score_line:
-            lines.append(f"{prefix} [{name}]({primary_url}) — {score_line}")
-        else:
-            lines.append(f"{prefix} [{name}]({primary_url})")
-
-        # Link row: price → SB; plus per-source links
-        link_chunks: list[str] = []
+        glass = _WINE_GLASS.get(wine.wine_type or "", _DEFAULT_GLASS)
         price_text = _escape(f"{int(wine.price)} kr") if wine.price else _escape("köp")
-        link_chunks.append(f"[{price_text}]({wine.sb_url})")
-        if w.vivino and source is not Source.VIVINO:
-            link_chunks.append(f"[Vivino]({w.vivino.wine_url})")
-        if w.munskankarna and w.munskankarna.review_url and source is not Source.MUNSKANKARNA:
-            link_chunks.append(f"[Munskänkarna]({w.munskankarna.review_url})")
-        lines.append("🛒 " + " · ".join(link_chunks))
+
+        lines.append(f"{glass} {name} — [{price_text}]({wine.sb_url})")
+
+        if w.vivino:
+            label = _escape(f"Vivino: {w.vivino.ratings_average:.1f} ★")
+            lines.append(f"[{label}]({w.vivino.wine_url})")
+
+        if w.munskankarna:
+            chunk = f"Munskänkarna: {w.munskankarna.score:g}/20"
+            if w.munskankarna.value_rating:
+                chunk += f" ({w.munskankarna.value_rating})"
+            label = _escape(chunk)
+            url = w.munskankarna.review_url
+            lines.append(f"[{label}]({url})" if url else label)
+
         lines.append("")
 
     return "\n".join(lines)
