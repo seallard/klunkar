@@ -75,6 +75,7 @@ class VivinoMatch:
     ratings_average: float
     ratings_count: int
     wine_url: str
+    fuzz_score: float
 
 
 def _slugify(name: str) -> str:
@@ -189,4 +190,5 @@ def lookup(
         ratings_average=stats.get("ratings_average", 0.0),
         ratings_count=stats.get("ratings_count", 0),
         wine_url=_WINE_PAGE_URL.format(wine_id=w["id"]),
+        fuzz_score=float(score),
     )

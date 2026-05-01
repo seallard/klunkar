@@ -5,8 +5,9 @@ from datetime import date, timedelta
 import httpx
 import psycopg
 
-from klunkar import config, db
-from klunkar.release import RankedWine, _escape, _sv_date, format_message
+from klunkar import config, db, ranking
+from klunkar.release import _escape, _source_label, _sv_date, format_message
+from klunkar.sources import ENRICHERS
 from klunkar.telegram import send_message
 
 log = logging.getLogger(__name__)
@@ -15,19 +16,43 @@ _POLL_TIMEOUT = 30
 _WELCOME = (
     "🍷 *Välkommen till Klunkar\\!*\n\n"
     "Dagen innan varje släpp av tillfälligt sortiment på Systembolaget får du de tio "
-    "bäst betygsatta vinerna enligt Vivino\\.\n\n"
-    "Använd /budget för att filtrera på maxpris, t\\.ex\\. /budget 150\\."
+    "bäst betygsatta vinerna\\.\n\n"
+    "Använd /budget för att filtrera på maxpris, t\\.ex\\. /budget 150\\.\n"
+    "Använd /source för att välja om listan rankas av Vivino eller Munskänkarna\\.\n"
+    "Använd /category för att filtrera på Munskänkarnas kategori, t\\.ex\\. /category fynd\\."
 )
 
+_VALUE_CANONICAL = ["fynd", "mer än prisvärt", "prisvärt", "ej prisvärt"]
+_VALUE_ALIASES = {
+    "fynd": "fynd",
+    "mer": "mer än prisvärt",
+    "mer än prisvärt": "mer än prisvärt",
+    "mer-an-prisvart": "mer än prisvärt",
+    "prisv": "prisvärt",
+    "prisvärt": "prisvärt",
+    "prisvart": "prisvärt",
+    "ej": "ej prisvärt",
+    "ej prisvärt": "ej prisvärt",
+    "ej-prisvart": "ej prisvärt",
+}
+_CATEGORY_CLEAR_TOKENS = {"clear", "off", "none", "-", "rensa", "ta-bort"}
 
-def _wines_from_rows(rows) -> list[RankedWine]:
-    return [
-        RankedWine(
-            rank=r[0], name=r[1], score=r[2], vivino_url=r[3],
-            sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
-        )
-        for r in rows
-    ]
+
+def parse_category_args(arg: str) -> tuple[list[str], list[str]]:
+    """Returns (resolved, unknown). Empty resolved + empty unknown = clear."""
+    raw = arg.strip().lower()
+    if not raw or raw in _CATEGORY_CLEAR_TOKENS:
+        return [], []
+    tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for tok in tokens:
+        canon = _VALUE_ALIASES.get(tok)
+        if canon is None:
+            unknown.append(tok)
+        elif canon not in resolved:
+            resolved.append(canon)
+    return resolved, unknown
 
 
 def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
@@ -44,20 +69,42 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
     return r.json().get("result", [])
 
 
+def _send_ranked(
+    chat_id: int, conn: psycopg.Connection, release_date: date, source: str
+) -> bool:
+    value_filter = db.get_subscriber_value_filter(conn, chat_id)
+    value_set = set(value_filter) if value_filter else None
+    ranked = ranking.build_ranked_view(
+        conn, release_date, source=source, value_ratings=value_set,
+    )
+    if not ranked:
+        return False
+    max_price = db.get_subscriber_budget(conn, chat_id)
+    send_message(
+        chat_id,
+        format_message(
+            ranked, release_date,
+            source=source, max_price=max_price, value_ratings=value_set,
+        ),
+    )
+    return True
+
+
+def _resolve_active_date(conn: psycopg.Connection) -> date | None:
+    tomorrow = date.today() + timedelta(days=1)
+    if db.has_wines_for(conn, tomorrow):
+        return tomorrow
+    return db.get_last_release_with_data(conn)
+
+
 def _handle_start(chat_id: int, conn: psycopg.Connection) -> None:
     new = db.add_subscriber(conn, chat_id)
     send_message(chat_id, _WELCOME)
     if new:
-        tomorrow = date.today() + timedelta(days=1)
-        rows = db.get_release_wines(conn, tomorrow)
-        release_date = tomorrow if rows else None
-        if not rows:
-            result = db.get_last_release_wines(conn, max_age_days=None)
-            if result:
-                release_date, rows = result
-        if rows:
-            max_price = db.get_subscriber_budget(conn, chat_id)
-            send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
+        target = _resolve_active_date(conn)
+        if target:
+            source = db.get_subscriber_rank_source(conn, chat_id)
+            _send_ranked(chat_id, conn, target, source)
     log.info("/start from %d (new=%s)", chat_id, new)
 
 
@@ -72,21 +119,112 @@ def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
             send_message(chat_id, "Ange ett giltigt belopp, t\\.ex\\. /budget 150\\.")
             return
     else:
-        max_price = None
         db.set_subscriber_budget(conn, chat_id, None)
         send_message(chat_id, "Budget borttagen \\— du får nu alla tio bästa vinerna\\.")
-    preview_date = db.get_subscriber_preview_date(conn, chat_id)
-    if preview_date:
-        rows = db.get_release_wines(conn, preview_date)
-        if rows:
-            send_message(chat_id, format_message(_wines_from_rows(rows), preview_date, max_price=max_price))
-            log.info("/budget from %d", chat_id)
-            return
-    result = db.get_last_release_wines(conn, max_age_days=None)
-    if result:
-        release_date, rows = result
-        send_message(chat_id, format_message(_wines_from_rows(rows), release_date, max_price=max_price))
+
+    target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+    if target:
+        source = db.get_subscriber_rank_source(conn, chat_id)
+        _send_ranked(chat_id, conn, target, source)
     log.info("/budget from %d", chat_id)
+
+
+def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split()
+    target = _resolve_active_date(conn)
+    available = db.get_available_sources_for(conn, target) if target else []
+    valid = list(ENRICHERS.keys())
+
+    if len(parts) < 2:
+        current = db.get_subscriber_rank_source(conn, chat_id)
+        lines = [
+            f"*Aktuell källa:* {_escape(_source_label(current))}",
+            "",
+            "*Tillgängliga källor för nästa släpp:*",
+        ]
+        if not available:
+            lines.append(_escape("Inga källor är tillgängliga ännu."))
+        else:
+            for s in available:
+                lines.append(f"• {_escape(_source_label(s))} — `/source {s}`")
+        send_message(chat_id, "\n".join(lines))
+        return
+
+    choice = parts[1].strip().lower()
+    if choice not in valid:
+        send_message(
+            chat_id,
+            _escape(
+                f"Okänd källa '{choice}'. Giltiga: {', '.join(valid)}."
+            ),
+        )
+        return
+
+    db.set_subscriber_rank_source(conn, chat_id, choice)
+    send_message(chat_id, f"Källa satt till *{_escape(_source_label(choice))}*\\.")
+
+    if target and not _send_ranked(chat_id, conn, target, choice):
+        send_message(
+            chat_id,
+            _escape(
+                f"{_source_label(choice)} har inga viner för nästa släpp ännu — "
+                "du får din lista när den landar."
+            ),
+        )
+    log.info("/source %s from %d", choice, chat_id)
+
+
+def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split(maxsplit=1)
+    arg = parts[1] if len(parts) >= 2 else ""
+
+    if not arg.strip():
+        current = db.get_subscriber_value_filter(conn, chat_id) or []
+        lines = ["*Munskänkarnas kategorier*", ""]
+        if current:
+            lines.append(f"Aktiv: {_escape(', '.join(current))}")
+        else:
+            lines.append(_escape("Aktiv: ingen (alla kategorier)"))
+        lines.append("")
+        lines.append("*Tillgängliga:*")
+        for v in _VALUE_CANONICAL:
+            lines.append(f"• {_escape(v)}")
+        lines.append("")
+        lines.append(_escape("Sätt med t.ex. /category fynd  eller  /category fynd,prisvärt"))
+        lines.append(_escape("Rensa med /category clear"))
+        send_message(chat_id, "\n".join(lines))
+        return
+
+    resolved, unknown = parse_category_args(arg)
+    if unknown:
+        send_message(
+            chat_id,
+            _escape(
+                f"Okänd kategori: {', '.join(unknown)}. "
+                f"Giltiga: {', '.join(_VALUE_CANONICAL)}."
+            ),
+        )
+        return
+
+    if not resolved:
+        db.set_subscriber_value_filter(conn, chat_id, None)
+        send_message(chat_id, _escape("Kategorifilter borttaget — du får alla kategorier."))
+    else:
+        db.set_subscriber_value_filter(conn, chat_id, resolved)
+        send_message(
+            chat_id,
+            _escape(f"Kategorifilter satt till: {', '.join(resolved)}."),
+        )
+
+    target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+    if target:
+        source = db.get_subscriber_rank_source(conn, chat_id)
+        if not _send_ranked(chat_id, conn, target, source):
+            send_message(
+                chat_id,
+                _escape("Inga viner matchar de filter du valt för nästa släpp."),
+            )
+    log.info("/category from %d → %s", chat_id, resolved or "[cleared]")
 
 
 def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -104,16 +242,22 @@ def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
             return
         target = upcoming[0]
 
-    rows = db.get_release_wines(conn, target)
-    if rows is None:
+    if not db.has_wines_for(conn, target):
         send_message(
             chat_id,
             f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
         )
         return
-    max_price = db.get_subscriber_budget(conn, chat_id)
+
     db.set_subscriber_preview_date(conn, chat_id, target)
-    send_message(chat_id, format_message(_wines_from_rows(rows), target, max_price=max_price))
+    source = db.get_subscriber_rank_source(conn, chat_id)
+    if not _send_ranked(chat_id, conn, target, source):
+        send_message(
+            chat_id,
+            _escape(
+                f"{_source_label(source)} har inga viner för {_sv_date(target)} ännu."
+            ),
+        )
     log.info("/preview %s from %d", target, chat_id)
 
 
@@ -139,7 +283,10 @@ def _handle_help(chat_id: int) -> None:
         "*/preview* — visa viner för nästa släpp\n"
         "*/preview 2026\\-05\\-08* — visa viner för ett specifikt datum\n"
         "*/budget 150* — visa viner under 150 kr\n"
-        "*/budget* — ta bort budgetfilter",
+        "*/budget* — ta bort budgetfilter\n"
+        "*/source* — visa eller välj rankningskälla \\(vivino, munskankarna\\)\n"
+        "*/category fynd* — filtrera på Munskänkarnas kategori\n"
+        "*/category clear* — ta bort kategorifilter",
     )
     log.info("/help from %d", chat_id)
 
@@ -161,6 +308,10 @@ def _handle_update(update: dict, conn: psycopg.Connection) -> None:
         _handle_start(chat_id, conn)
     elif text.startswith("/budget"):
         _handle_budget(chat_id, text, conn)
+    elif text.startswith("/source"):
+        _handle_source(chat_id, text, conn)
+    elif text.startswith("/category"):
+        _handle_category(chat_id, text, conn)
     elif text.startswith("/preview"):
         _handle_preview(chat_id, text, conn)
     elif text.startswith("/releases"):

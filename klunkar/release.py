@@ -1,31 +1,19 @@
 import logging
 import re
-from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
-from klunkar.telegram import send_message
 import psycopg
 
-from klunkar import config, db, systembolaget, vivino
+from klunkar import config, db, ranking, systembolaget
+from klunkar.models import RankedWine, Wine
+from klunkar.sources import ENRICHERS
+from klunkar.telegram import send_message
 
 log = logging.getLogger(__name__)
 
 
-@dataclass
-class RankedWine:
-    rank: int
-    name: str
-    score: float
-    vivino_url: str
-    sb_url: str
-    price: float
-    wine_type: str
-
-
-def _bayesian_score(r: float, v: int, c: float, m: int) -> float:
-    return (v / (v + m)) * r + (m / (v + m)) * c
-
+# ---- APIM key resolve ---------------------------------------------------
 
 def _resolve_apim_key(conn: psycopg.Connection, client: httpx.Client) -> str:
     key = db.get_apim_key(conn)
@@ -50,63 +38,206 @@ def _fetch_with_key_refresh(
         return systembolaget.fetch_release_products(release_date, key, client)
 
 
-def rank_release(products: list[systembolaget.SBProduct], client: httpx.Client) -> list[RankedWine]:
-    matches: list[tuple[systembolaget.SBProduct, vivino.VivinoMatch]] = []
-    vivino_cache: dict = {}
-    vivino.prime_session(client)
+# ---- Wine ingest --------------------------------------------------------
 
-    for product in products:
-        match = vivino.lookup(product.producer, product.name, client, vivino_cache)
-        if match is None:
-            log.info("No Vivino match for '%s' (%s)", product.name, product.producer)
-            continue
-        matches.append((product, match))
-
-    if not matches:
-        return []
-
-    c = sum(m.ratings_average for _, m in matches) / len(matches)
-    m_prior = config.VIVINO_RATING_PRIOR
-
-    scored = [
-        (
-            product,
-            match,
-            _bayesian_score(match.ratings_average, match.ratings_count, c, m_prior),
-        )
-        for product, match in matches
-    ]
-    scored.sort(key=lambda t: t[2], reverse=True)
-
+def _wines_from_products(
+    release_date: date, products: list[systembolaget.SBProduct]
+) -> list[Wine]:
     return [
-        RankedWine(
-            rank=i + 1,
-            name=product.name,
-            score=score,
-            vivino_url=match.wine_url,
-            sb_url=product.product_url,
-            price=product.price,
-            wine_type=product.wine_type,
+        Wine(
+            sb_product_number=p.product_number,
+            sb_product_id=p.product_id,
+            release_date=release_date,
+            name=p.name,
+            producer=p.producer,
+            sb_url=p.product_url,
+            price=p.price or None,
+            wine_type=p.wine_type or None,
         )
-        for i, (product, match, score) in enumerate(scored)
+        for p in products
     ]
 
+
+# ---- Enrichment policy --------------------------------------------------
+
+def _should_run(conn: psycopg.Connection, release_date: date, source: str) -> bool:
+    last = db.get_last_run(conn, release_date, source)
+    if last is None:
+        return True
+    run_at, matched = last
+    age = datetime.now(timezone.utc) - run_at
+    if matched == 0:
+        # Retry-on-empty (handles late-publishing sources like Munskänkarna),
+        # but respect the refresh interval so we don't hammer per cron tick.
+        return age >= timedelta(hours=config.ENRICHMENT_REFRESH_HOURS)
+    if release_date < date.today():
+        return False
+    return age >= timedelta(hours=config.ENRICHMENT_REFRESH_HOURS)
+
+
+def _run_enrichers(
+    conn: psycopg.Connection,
+    release_date: date,
+    client: httpx.Client,
+    *,
+    only: str | None = None,
+    force: bool = False,
+) -> dict[str, tuple[int, int]]:
+    summary: dict[str, tuple[int, int]] = {}
+    wines = db.get_wines(conn, release_date)
+    if not wines:
+        return summary
+    for source_name, enricher in ENRICHERS.items():
+        if only and source_name != only:
+            continue
+        if not force and not _should_run(conn, release_date, source_name):
+            log.info("Skipping %s for %s (recent run)", source_name, release_date)
+            continue
+        try:
+            results = enricher.enrich_release(release_date, wines, client, conn)
+        except Exception:
+            log.exception("Enricher %s failed for %s", source_name, release_date)
+            continue
+        db.upsert_enrichments(conn, release_date, source_name, results)
+        db.record_enrichment_run(conn, release_date, source_name, len(results), len(wines))
+        summary[source_name] = (len(results), len(wines))
+        log.info(
+            "Enricher %s for %s: matched %d/%d", source_name, release_date, len(results), len(wines)
+        )
+    return summary
+
+
+# ---- Public orchestration -----------------------------------------------
+
+def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
+    """Scrape upcoming releases, persist wines, run all enrichers (idempotent)."""
+    try:
+        all_dates = systembolaget.scrape_release_dates(client)
+    except Exception as e:
+        log.error("Could not scrape release dates: %s", e)
+        return
+
+    today = date.today()
+    horizon = today + timedelta(days=10)
+    upcoming_dates = [d for d in all_dates if today <= d < horizon]
+    db.save_release_dates(conn, upcoming_dates)
+
+    for release_date in upcoming_dates:
+        try:
+            if not db.has_wines_for(conn, release_date):
+                products = _fetch_with_key_refresh(release_date, conn, client)
+                if not products:
+                    continue
+                db.upsert_wines(conn, _wines_from_products(release_date, products))
+            _run_enrichers(conn, release_date, client)
+        except Exception:
+            log.exception("Prefetch failed for %s", release_date)
+
+    # Backfill: revisit recent past releases. _should_run skips sources that
+    # already matched, so this is cheap when nothing changed (typically a single
+    # Munskänkarna fetch per release that was 0-match pre-release).
+    backfill_since = today - timedelta(days=config.BACKFILL_WINDOW_DAYS)
+    for past_date in db.get_past_release_dates_with_data(conn, since=backfill_since):
+        try:
+            _run_enrichers(conn, past_date, client)
+        except Exception:
+            log.exception("Backfill enrichment failed for %s", past_date)
+
+
+def enrich_release(
+    conn: psycopg.Connection,
+    client: httpx.Client,
+    release_date: date,
+    *,
+    only: str | None = None,
+    force: bool = False,
+) -> dict[str, tuple[int, int]]:
+    """Run enrichers for one release on demand. Caller must ensure wines exist."""
+    return _run_enrichers(conn, release_date, client, only=only, force=force)
+
+
+def _notify_subscribers(
+    conn: psycopg.Connection,
+    release_date: date,
+    subscribers: list[tuple[int, float | None, str, list[str] | None]],
+    *,
+    log_prefix: str = "",
+) -> int:
+    """Send the ranked-view message to each eligible subscriber. Returns send count."""
+    sent = 0
+    for chat_id, max_price, rank_source, value_filter in subscribers:
+        if db.has_notified_subscriber(conn, release_date, chat_id):
+            continue
+        value_set = set(value_filter) if value_filter else None
+        ranked = ranking.build_ranked_view(
+            conn, release_date, source=rank_source, value_ratings=value_set,
+        )
+        if not ranked:
+            log.info(
+                "%sNo %s-ranked wines for %s — skipping chat %d",
+                log_prefix, rank_source, release_date, chat_id,
+            )
+            continue
+        try:
+            send_message(
+                chat_id,
+                format_message(
+                    ranked, release_date,
+                    source=rank_source,
+                    max_price=max_price,
+                    value_ratings=value_set,
+                ),
+            )
+            db.mark_notified_subscriber(conn, release_date, chat_id)
+            sent += 1
+        except Exception as e:
+            log.error("%sFailed to send to %d: %s", log_prefix, chat_id, e)
+    return sent
+
+
+def check_and_notify(conn: psycopg.Connection) -> bool:
+    """Notify subscribers about tomorrow's release, then any retroactive sends.
+
+    Retroactive sends cover subscribers who joined before a recent past release
+    but were skipped at the time because their chosen source had no data
+    (typically Munskänkarna pre-publication).
+    """
+    notified_total = 0
+    today = date.today()
+
+    # Tomorrow's release
+    tomorrow = today + timedelta(1)
+    if db.is_upcoming_release_date(conn, tomorrow):
+        sent = _notify_subscribers(conn, tomorrow, db.get_subscribers(conn))
+        notified_total += sent
+        if sent and not db.is_release_seen(conn, tomorrow):
+            wines_total = len(db.get_wines(conn, tomorrow))
+            db.mark_release_seen(conn, tomorrow, wines_total)
+
+    # Retroactive: past releases inside the backfill window
+    backfill_since = today - timedelta(days=config.BACKFILL_WINDOW_DAYS)
+    for past_date in db.get_past_release_dates_with_data(conn, since=backfill_since):
+        eligible = db.get_subscribers_to_notify_for(conn, past_date)
+        if not eligible:
+            continue
+        sent = _notify_subscribers(conn, past_date, eligible, log_prefix="[backfill] ")
+        if sent:
+            log.info("Retro-notified %d subscribers for %s", sent, past_date)
+            notified_total += sent
+            if not db.is_release_seen(conn, past_date):
+                wines_total = len(db.get_wines(conn, past_date))
+                db.mark_release_seen(conn, past_date, wines_total)
+
+    return notified_total > 0
+
+
+# ---- Message formatting -------------------------------------------------
 
 _MDV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
 
 _MONTHS_SV = [
-    "januari",
-    "februari",
-    "mars",
-    "april",
-    "maj",
-    "juni",
-    "juli",
-    "augusti",
-    "september",
-    "oktober",
-    "november",
-    "december",
+    "januari", "februari", "mars", "april", "maj", "juni",
+    "juli", "augusti", "september", "oktober", "november", "december",
 ]
 
 _MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
@@ -122,97 +253,71 @@ def _sv_date(d: date) -> str:
     return f"{d.day} {_MONTHS_SV[d.month - 1]} {d.year}"
 
 
+def _source_label(source: str) -> str:
+    return {"vivino": "Vivino", "munskankarna": "Munskänkarna"}.get(source, source)
+
+
 def format_message(
-    wines: list[RankedWine], release_date: date, max_price: float | None = None
+    wines: list[RankedWine],
+    release_date: date,
+    *,
+    source: str,
+    max_price: float | None = None,
+    value_ratings: set[str] | None = None,
 ) -> str:
     if max_price:
-        wines = [w for w in wines if w.price <= max_price]
-
+        wines = [w for w in wines if (w.wine.price or 0) <= max_price]
     wines = wines[: config.TOP_N]
+
     date_str = _escape(_sv_date(release_date))
-    lines = [f"🍷 *Tillfälligt sortiment \u2014 {date_str}*"]
-
+    header = f"🍷 *Tillfälligt sortiment — {date_str}*"
     if max_price:
-        lines[0] += f" \\(max {_escape(f'{int(max_price)} kr')}\\)"
+        header += f" \\(max {_escape(f'{int(max_price)} kr')}\\)"
+    sub_lines = [_escape(f"Rankas av {_source_label(source)}")]
+    if value_ratings:
+        cats = ", ".join(sorted(value_ratings))
+        sub_lines.append(_escape(f"Kategori: {cats}"))
+    lines = [header, *sub_lines, ""]
 
-    lines.append("")
+    for i, w in enumerate(wines, start=1):
+        rank = i
+        wine = w.wine
+        name = _escape(wine.name)
+        medal = _MEDALS.get(rank, "")
+        prefix = medal if medal else _WINE_GLASS.get(wine.wine_type or "", _DEFAULT_GLASS)
 
-    for w in wines:
-        name = _escape(w.name)
-        medal = _MEDALS.get(w.rank, "")
-        prefix = medal if medal else _WINE_GLASS.get(w.wine_type, _DEFAULT_GLASS)
-        score = _escape(f"{w.score:.1f}")
-        link_text = f"{name} \\({score}\\)"
-        lines.append(f"{prefix} [{link_text}]({w.vivino_url})")
-        price_text = _escape(f"{int(w.price)} kr") if w.price else "köp"
-        lines.append(f"🛒 [{price_text}]({w.sb_url})")
+        # Score chunks
+        score_chunks: list[str] = []
+        if w.vivino:
+            score_chunks.append(_escape(f"{w.vivino.ratings_average:.1f} ★ Vivino"))
+        if w.munskankarna:
+            msk = f"{w.munskankarna.score:g}/20 Munskänkarna"
+            if w.munskankarna.value_rating:
+                msk += f" ({w.munskankarna.value_rating})"
+            score_chunks.append(_escape(msk))
+        score_line = " · ".join(score_chunks) if score_chunks else ""
+
+        # Primary clickable name → primary link of chosen source if present, else SB
+        primary_url = wine.sb_url
+        if source == "vivino" and w.vivino:
+            primary_url = w.vivino.wine_url
+        elif source == "munskankarna" and w.munskankarna and w.munskankarna.review_url:
+            primary_url = w.munskankarna.review_url
+
+        if score_line:
+            lines.append(f"{prefix} [{name}]({primary_url}) — {score_line}")
+        else:
+            lines.append(f"{prefix} [{name}]({primary_url})")
+
+        # Link row: price → SB; plus per-source links
+        link_chunks: list[str] = []
+        price_text = _escape(f"{int(wine.price)} kr") if wine.price else _escape("köp")
+        link_chunks.append(f"[{price_text}]({wine.sb_url})")
+        if w.vivino and source != "vivino":
+            link_chunks.append(f"[Vivino]({w.vivino.wine_url})")
+        if w.munskankarna and w.munskankarna.review_url and source != "munskankarna":
+            link_chunks.append(f"[Munskänkarna]({w.munskankarna.review_url})")
+        lines.append("🛒 " + " · ".join(link_chunks))
         lines.append("")
 
     return "\n".join(lines)
-
-
-def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
-    """Fetch and cache scored wines for all upcoming releases (next 10 days)."""
-    try:
-        all_dates = systembolaget.scrape_release_dates(client)
-    except Exception as e:
-        log.error("Could not scrape release dates: %s", e)
-        return
-
-    today = date.today()
-    horizon = today + timedelta(days=10)
-    upcoming_dates = [d for d in all_dates if today <= d < horizon]
-
-    db.save_release_dates(conn, upcoming_dates)
-
-    for release_date in upcoming_dates:
-        if db.get_release_wines(conn, release_date) is not None:
-            continue
-
-        try:
-            products = _fetch_with_key_refresh(release_date, conn, client)
-
-            if not products:
-                continue
-
-            if wines := rank_release(products, client):
-                db.save_release_wines(conn, release_date, wines)
-
-        except Exception:
-            log.exception("Prefetch failed for release date: %s", release_date)
-
-
-def check_and_notify(conn: psycopg.Connection) -> bool:
-    """Return True if a release was found for tomorrow and notifications sent."""
-    release_date = date.today() + timedelta(1)
-
-    if not db.is_upcoming_release_date(conn, release_date):
-        return False
-
-    if db.is_release_seen(conn, release_date):
-        return False
-
-    release_wines = db.get_release_wines(conn, release_date)
-
-    if not release_wines:
-        return False
-
-    wines = [
-        RankedWine(
-            rank=r[0],name=r[1], score=r[2], vivino_url=r[3],
-            sb_url=r[4], price=r[5] or 0.0, wine_type=r[6] or "",
-        )
-        for r in release_wines
-    ]
-
-    subscribers = db.get_subscribers(conn)
-    log.info("Sending to %d subscribers.", len(subscribers))
-
-    for chat_id, max_price in subscribers:
-        try:
-            send_message(chat_id, format_message(wines, release_date, max_price=max_price))
-        except Exception as e:
-            log.error("Failed to send to %d: %s", chat_id, e)
-
-    db.mark_release_seen(conn, release_date, len(wines))
-    return True

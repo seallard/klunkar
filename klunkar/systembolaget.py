@@ -25,6 +25,7 @@ _HREF_DATE_RE = re.compile(
 @dataclass
 class SBProduct:
     product_id: str
+    product_number: str
     name: str
     producer: str
     product_url: str
@@ -33,8 +34,15 @@ class SBProduct:
 
 
 def _extract_apim_key_from_js(js: str) -> str | None:
-    matches = _APIM_KEY_RE.findall(js)
-    return matches[0] if matches else None
+    """Return the first 32-hex literal that looks like a real key.
+
+    Skips low-entropy strings (e.g. "00000000…", "ffffffff…"), which are
+    placeholders some Next.js chunks carry alongside the real key.
+    """
+    for match in _APIM_KEY_RE.findall(js):
+        if len(set(match)) > 4:
+            return match
+    return None
 
 
 def scrape_apim_key(client: httpx.Client) -> str:
@@ -85,8 +93,15 @@ def _product_url(product: dict) -> str:
 
 
 def _parse_product(p: dict) -> SBProduct:
+    # `productNumberShort` is the bare artikelnummer (e.g. "91176") that appears
+    # on receipts, in the SB app, and on Munskänkarna's pages. `productNumber`
+    # ("9117601") embeds a 2-digit pack-size suffix and is only useful for URLs.
+    artikelnummer = str(
+        p.get("productNumberShort") or p.get("productNumber") or p["productId"]
+    )
     return SBProduct(
         product_id=p["productId"],
+        product_number=artikelnummer,
         name=((p.get("productNameBold") or "") + " " + (p.get("productNameThin") or "")).strip(),
         producer=p.get("producerName", ""),
         product_url=_product_url(p),
