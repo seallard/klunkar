@@ -97,6 +97,13 @@ def _resolve_active_date(conn: psycopg.Connection) -> date | None:
     return db.get_last_release_with_data(conn)
 
 
+def _empty_view_message(target: date) -> str:
+    return (
+        f"Inga viner för {_sv_date(target)} matchar dina filter. "
+        "Se /settings för aktuella inställningar."
+    )
+
+
 def _handle_start(chat_id: int, conn: psycopg.Connection) -> None:
     new = db.add_subscriber(conn, chat_id)
     send_message(chat_id, _WELCOME)
@@ -175,13 +182,7 @@ def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     send_message(chat_id, f"Källa satt till *{_escape(_source_label(choice))}*\\.")
 
     if target and not _send_ranked(chat_id, conn, target, choice):
-        send_message(
-            chat_id,
-            _escape(
-                f"{_source_label(choice)} har inga viner för nästa släpp ännu — "
-                "du får din lista när den landar."
-            ),
-        )
+        send_message(chat_id, _escape(_empty_view_message(target)))
     log.info("/source %s from %d", choice, chat_id)
 
 
@@ -231,10 +232,7 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     if target:
         source = db.get_subscriber_rank_source(conn, chat_id)
         if not _send_ranked(chat_id, conn, target, source):
-            send_message(
-                chat_id,
-                _escape("Inga viner matchar de filter du valt för nästa släpp."),
-            )
+            send_message(chat_id, _escape(_empty_view_message(target)))
     log.info("/category from %d → %s", chat_id, resolved or "[cleared]")
 
 
@@ -263,12 +261,7 @@ def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     db.set_subscriber_preview_date(conn, chat_id, target)
     source = db.get_subscriber_rank_source(conn, chat_id)
     if not _send_ranked(chat_id, conn, target, source):
-        send_message(
-            chat_id,
-            _escape(
-                f"{_source_label(source)} har inga viner för {_sv_date(target)} ännu."
-            ),
-        )
+        send_message(chat_id, _escape(_empty_view_message(target)))
     log.info("/preview %s from %d", target, chat_id)
 
 

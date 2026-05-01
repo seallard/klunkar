@@ -130,6 +130,15 @@ def test_settings_handles_unset_state(fake_state):
     assert "Nästa släpp:" in msg and "okänt" in msg
 
 
+# ---- _empty_view_message -----------------------------------------------
+
+def test_empty_view_message_mentions_filters_and_settings():
+    msg = bot._empty_view_message(date(2026, 4, 24))
+    assert "matchar dina filter" in msg
+    assert "/settings" in msg
+    assert "24 april 2026" in msg
+
+
 # ---- handler dispatch ---------------------------------------------------
 
 def test_settings_command_is_dispatched():
