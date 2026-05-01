@@ -19,9 +19,7 @@ _WELCOME = (
     "🍷 *Välkommen till Klunkar\\!*\n\n"
     "Dagen innan varje släpp av tillfälligt sortiment på Systembolaget får du de tio "
     "bäst betygsatta vinerna\\.\n\n"
-    "Använd /budget för att filtrera på maxpris, t\\.ex\\. /budget 150\\.\n"
-    "Använd /source för att välja om listan rankas av Vivino eller Munskänkarna\\.\n"
-    "Använd /category för att filtrera på Munskänkarnas kategori, t\\.ex\\. /category fynd\\."
+    "Skriv /settings för att se dina inställningar eller /help för alla kommandon\\."
 )
 
 _VALUE_CANONICAL = ["fynd", "mer än prisvärt", "prisvärt", "ej prisvärt"]
@@ -37,13 +35,13 @@ _VALUE_ALIASES = {
     "ej prisvärt": "ej prisvärt",
     "ej-prisvart": "ej prisvärt",
 }
-_CATEGORY_CLEAR_TOKENS = {"clear", "off", "none", "-", "rensa", "ta-bort"}
+_CLEAR_TOKENS = {"clear", "off", "none", "-", "rensa", "ta-bort"}
 
 
 def parse_category_args(arg: str) -> tuple[list[str], list[str]]:
     """Returns (resolved, unknown). Empty resolved + empty unknown = clear."""
     raw = arg.strip().lower()
-    if not raw or raw in _CATEGORY_CLEAR_TOKENS:
+    if not raw or raw in _CLEAR_TOKENS:
         return [], []
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     resolved: list[str] = []
@@ -112,17 +110,31 @@ def _handle_start(chat_id: int, conn: psycopg.Connection) -> None:
 
 def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split()
-    if len(parts) >= 2:
-        try:
-            max_price = float(parts[1])
-            db.set_subscriber_budget(conn, chat_id, max_price)
-            send_message(chat_id, f"Budget satt till {int(max_price)} kr\\.")
-        except ValueError:
-            send_message(chat_id, "Ange ett giltigt belopp, t\\.ex\\. /budget 150\\.")
-            return
-    else:
+
+    if len(parts) < 2:
+        current = db.get_subscriber_budget(conn, chat_id)
+        if current is None:
+            status = "Ingen budget satt — du får alla tio bästa vinerna."
+        else:
+            status = f"Aktuell budget: {int(current)} kr."
+        send_message(
+            chat_id,
+            _escape(f"{status}\nSätt med /budget 150. Rensa med /budget clear."),
+        )
+        return
+
+    arg = parts[1].strip().lower()
+    if arg in _CLEAR_TOKENS:
         db.set_subscriber_budget(conn, chat_id, None)
-        send_message(chat_id, "Budget borttagen \\— du får nu alla tio bästa vinerna\\.")
+        send_message(chat_id, _escape("Budget borttagen — du får alla tio bästa vinerna."))
+    else:
+        try:
+            max_price = float(arg)
+        except ValueError:
+            send_message(chat_id, _escape("Ange ett giltigt belopp, t.ex. /budget 150."))
+            return
+        db.set_subscriber_budget(conn, chat_id, max_price)
+        send_message(chat_id, _escape(f"Budget satt till {int(max_price)} kr."))
 
     target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
     if target:
@@ -272,20 +284,56 @@ def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/releases from %d", chat_id)
 
 
+def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
+    source = db.get_subscriber_rank_source(conn, chat_id)
+    budget = db.get_subscriber_budget(conn, chat_id)
+    value_filter = db.get_subscriber_value_filter(conn, chat_id)
+
+    next_release: date | None = None
+    upcoming = db.get_upcoming_release_dates(conn, date.today())
+    if upcoming:
+        next_release = upcoming[0]
+
+    budget_text = f"{int(budget)} kr" if budget is not None else "ingen"
+    category_text = ", ".join(value_filter) if value_filter else "alla"
+    next_text = _sv_date(next_release) if next_release else "okänt"
+
+    lines = [
+        "🍷 *Dina inställningar*",
+        "",
+        f"*Källa:* {_escape(_source_label(source))}",
+        f"*Budget:* {_escape(budget_text)}",
+        f"*Kategori:* {_escape(category_text)}",
+        "",
+        f"*Nästa släpp:* {_escape(next_text)}",
+    ]
+    send_message(chat_id, "\n".join(lines))
+    log.info("/settings from %d", chat_id)
+
+
 def _handle_help(chat_id: int) -> None:
     send_message(
         chat_id,
-        "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets tillfälliga sortiment\\.\n\n"
-        "*/start* — prenumerera\n"
-        "*/stop* — avsluta\n"
-        "*/releases* — kommande släpp\n"
-        "*/preview* — visa viner för nästa släpp\n"
-        "*/preview 2026\\-05\\-08* — visa viner för ett specifikt datum\n"
-        "*/budget 150* — visa viner under 150 kr\n"
-        "*/budget* — ta bort budgetfilter\n"
-        "*/source* — visa eller välj rankningskälla \\(vivino, munskankarna\\)\n"
-        "*/category fynd* — filtrera på Munskänkarnas kategori\n"
-        "*/category clear* — ta bort kategorifilter",
+        "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets "
+        "tillfälliga sortiment\\.\n\n"
+        "*Prenumeration*\n"
+        "/start — prenumerera\n"
+        "/stop — avsluta\n\n"
+        "*Visa listor*\n"
+        "/preview — viner för nästa släpp\n"
+        "/preview 2026\\-05\\-08 — viner för ett specifikt datum\n"
+        "/releases — kommande släpp\n\n"
+        "*Filtrera*\n"
+        "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
+        "/budget — visa nuvarande budget\n"
+        "/budget 150 — sätt budget till 150 kr\n"
+        "/budget clear — ta bort budgetfilter\n"
+        "/category — visa nuvarande kategorifilter\n"
+        "/category fynd — filtrera på Munskänkarnas kategori \\(t\\.ex\\. *fynd*, *mer än prisvärt*\\)\n"
+        "/category clear — ta bort kategorifilter\n\n"
+        "*Information*\n"
+        "/settings — visa dina inställningar\n"
+        "/help — denna hjälp",
     )
     log.info("/help from %d", chat_id)
 
@@ -303,6 +351,7 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/category": _handle_category,
     "/preview":  _handle_preview,
     "/releases": lambda c, t, conn: _handle_releases(c, conn),
+    "/settings": lambda c, t, conn: _handle_settings(c, conn),
     "/help":     lambda c, t, conn: _handle_help(c),
     "/stop":     lambda c, t, conn: _handle_stop(c, conn),
 }
