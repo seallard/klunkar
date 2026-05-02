@@ -262,21 +262,7 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/clear from %d → %s", chat_id, cleared or "[noop]")
 
 
-def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
-    parts = text.split()
-    if len(parts) >= 2:
-        try:
-            target = date.fromisoformat(parts[1])
-        except ValueError:
-            send_message(chat_id, "Ange ett datum, t\\.ex\\. /preview 2026\\-05\\-08\\.")
-            return
-    else:
-        upcoming = db.get_upcoming_release_dates(conn, date.today())
-        if not upcoming:
-            send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
-            return
-        target = upcoming[0]
-
+def _send_for_date(chat_id: int, target: date, conn: psycopg.Connection) -> None:
     if not db.has_wines_for(conn, target):
         send_message(
             chat_id,
@@ -288,7 +274,32 @@ def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     source = db.get_subscriber_rank_source(conn, chat_id)
     if not _send_ranked(chat_id, conn, target, source):
         send_message(chat_id, _escape(_empty_view_message(target)))
-    log.info("/preview %s from %d", target, chat_id)
+
+
+def _handle_next(chat_id: int, conn: psycopg.Connection) -> None:
+    upcoming = db.get_upcoming_release_dates(conn, date.today())
+    if not upcoming:
+        send_message(chat_id, "Inga kommande släpp hittades inom de närmaste 90 dagarna\\.")
+        return
+    _send_for_date(chat_id, upcoming[0], conn)
+    log.info("/next %s from %d", upcoming[0], chat_id)
+
+
+def _handle_old(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split()
+    if len(parts) < 2:
+        send_message(chat_id, "Ange ett datum, t\\.ex\\. /old 2026\\-04\\-24\\.")
+        return
+    try:
+        target = date.fromisoformat(parts[1])
+    except ValueError:
+        send_message(
+            chat_id,
+            "Ogiltigt datum\\. Använd format YYYY\\-MM\\-DD, t\\.ex\\. /old 2026\\-04\\-24\\.",
+        )
+        return
+    _send_for_date(chat_id, target, conn)
+    log.info("/old %s from %d", target, chat_id)
 
 
 def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
@@ -351,9 +362,9 @@ def _handle_help(chat_id: int) -> None:
         "/start — prenumerera\n"
         "/stop — avsluta\n\n"
         "*Visa listor*\n"
-        "/preview — viner för nästa släpp\n"
-        "/preview 2026\\-05\\-08 — viner för ett specifikt datum\n"
+        "/next — viner för nästa släpp\n"
         "/recent — viner från senaste släpp\n"
+        "/old 2026\\-04\\-24 — viner från ett tidigare släpp\n"
         "/releases — kommande släpp\n\n"
         "*Filtrera*\n"
         "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
@@ -381,7 +392,8 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/source": _handle_source,
     "/category": _handle_category,
     "/clear": lambda c, t, conn: _handle_clear(c, conn),
-    "/preview": _handle_preview,
+    "/next": lambda c, t, conn: _handle_next(c, conn),
+    "/old": _handle_old,
     "/recent": lambda c, t, conn: _handle_recent(c, conn),
     "/releases": lambda c, t, conn: _handle_releases(c, conn),
     "/settings": lambda c, t, conn: _handle_settings(c, conn),
