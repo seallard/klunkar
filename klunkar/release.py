@@ -300,9 +300,9 @@ def format_message(
 
     date_str = _escape(_sv_date(release_date))
     header = f"🍷 *Tillfälligt sortiment — {date_str}*"
-    if max_price:
-        header += f" \\(max {_escape(f'{int(max_price)} kr')}\\)"
     sub_lines = [_escape(f"Rankas av {_source_label(source)}")]
+    if max_price:
+        sub_lines.append(_escape(f"Budget: {int(max_price)} kr"))
     if value_ratings:
         cats = ", ".join(sorted(value_ratings))
         sub_lines.append(_escape(f"Kategori: {cats}"))

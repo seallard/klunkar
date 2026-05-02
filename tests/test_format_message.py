@@ -128,7 +128,7 @@ def test_budget_filter_drops_expensive_wines():
     out = format_message([pricey, cheap], RD, source="munskankarna", max_price=500)
     assert "Cheap" in out
     assert "Pricey" not in out
-    assert "max 500 kr" in out
+    assert "Budget: 500 kr" in out
 
 
 def test_markdownv2_escapes_dots_and_parens():
