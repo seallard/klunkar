@@ -240,7 +240,16 @@ _MONTHS_SV = [
     "juli", "augusti", "september", "oktober", "november", "december",
 ]
 
-_WINE_GLASS = {"Rött vin": "🍷", "Vitt vin": "🥂", "Rosévin": "🌸"}
+_WINE_GLASS = {
+    "Rött vin": "🍷",
+    "Vitt vin": "🥂",
+    "Rosévin": "🌸",
+    "Mousserande vin": "🍾",
+    "Starkvin": "🥃",
+    "Smaksatt vin & fruktvin": "🍇",
+    "Aperitifer": "🍸",
+    "Vermouth": "🍸",
+}
 _DEFAULT_GLASS = "🍷"
 
 
