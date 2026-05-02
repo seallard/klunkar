@@ -9,7 +9,7 @@ import psycopg
 from klunkar import config, db, ranking
 from klunkar.models import Source
 from klunkar.release import _escape, _source_label, _sv_date, format_message
-from klunkar.telegram import send_message
+from klunkar.telegram import answer_callback_query, edit_message_text, send_message
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def _get_updates(base: str, client: httpx.Client, offset: int) -> list[dict]:
         params={
             "timeout": _POLL_TIMEOUT,
             "offset": offset,
-            "allowed_updates": ["message"],
+            "allowed_updates": ["message", "callback_query"],
         },
         timeout=_POLL_TIMEOUT + 10,
     )
@@ -188,24 +188,26 @@ def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     log.info("/budget from %d", chat_id)
 
 
+def _source_keyboard(current: Source) -> dict:
+    row = []
+    for s in Source:
+        label = _source_label(s)
+        prefix = "✅ " if s is current else ""
+        row.append({"text": f"{prefix}{label}", "callback_data": f"src:{s.value}"})
+    return {"inline_keyboard": [row]}
+
+
+def _source_picker_text(current: Source) -> str:
+    return f"*Välj rankningskälla*\nAktiv: {_escape(_source_label(current))}"
+
+
 def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split()
     target = _resolve_active_date(conn)
-    available = db.get_available_sources_for(conn, target) if target else []
 
     if len(parts) < 2:
         current = db.get_subscriber_rank_source(conn, chat_id)
-        lines = [
-            f"*Aktuell källa:* {_escape(_source_label(current))}",
-            "",
-            "*Tillgängliga källor för nästa släpp:*",
-        ]
-        if not available:
-            lines.append(_escape("Inga källor är tillgängliga ännu."))
-        else:
-            for s in available:
-                lines.append(f"• {_escape(_source_label(s))} — `/source {s}`")
-        send_message(chat_id, "\n".join(lines))
+        send_message(chat_id, _source_picker_text(current), reply_markup=_source_keyboard(current))
         return
 
     raw = parts[1].strip().lower()
@@ -224,25 +226,71 @@ def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     log.info("/source %s from %d", choice, chat_id)
 
 
+def _handle_source_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    try:
+        choice = Source(payload)
+    except ValueError:
+        log.warning("Unknown source callback payload: %r", payload)
+        return
+    db.set_subscriber_rank_source(conn, chat_id, choice)
+    edit_message_text(
+        chat_id,
+        message_id,
+        _source_picker_text(choice),
+        reply_markup=_source_keyboard(choice),
+    )
+    target = _resolve_active_date(conn)
+    if target and not _send_ranked(chat_id, conn, target, choice):
+        send_message(chat_id, _escape(_empty_view_message(target)))
+    log.info("/source callback %s from %d", choice, chat_id)
+
+
+# Short tokens for callback_data (≤64 bytes total). Map both directions.
+_CATEGORY_TOKENS: dict[str, str] = {
+    "fynd": "fynd",
+    "mer": "mer än prisvärt",
+    "prisv": "prisvärt",
+    "ej": "ej prisvärt",
+}
+_CATEGORY_TOKEN_FROM_CANONICAL = {v: k for k, v in _CATEGORY_TOKENS.items()}
+
+
+def _category_picker_text(active: list[str]) -> str:
+    if active:
+        body = f"Aktiv: {_escape(', '.join(active))}"
+    else:
+        body = _escape("Aktiv: ingen (alla kategorier)")
+    return f"*Välj kategori*\n{body}"
+
+
+def _category_keyboard(active: list[str]) -> dict:
+    active_set = set(active)
+    rows: list[list[dict]] = []
+    pair: list[dict] = []
+    for canonical in _VALUE_CANONICAL:
+        token = _CATEGORY_TOKEN_FROM_CANONICAL[canonical]
+        prefix = "✅" if canonical in active_set else "◯"
+        pair.append({"text": f"{prefix} {canonical}", "callback_data": f"cat:{token}"})
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([{"text": "Klar — visa lista", "callback_data": "cat:done"}])
+    return {"inline_keyboard": rows}
+
+
 def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split(maxsplit=1)
     arg = parts[1] if len(parts) >= 2 else ""
 
     if not arg.strip():
         current = db.get_subscriber_value_filter(conn, chat_id) or []
-        lines = ["*Munskänkarnas kategorier*", ""]
-        if current:
-            lines.append(f"Aktiv: {_escape(', '.join(current))}")
-        else:
-            lines.append(_escape("Aktiv: ingen (alla kategorier)"))
-        lines.append("")
-        lines.append("*Tillgängliga:*")
-        for v in _VALUE_CANONICAL:
-            lines.append(f"• {_escape(v)}")
-        lines.append("")
-        lines.append(_escape("Sätt med t.ex. /category fynd  eller  /category fynd,prisvärt"))
-        lines.append(_escape("Rensa alla filter med /clear"))
-        send_message(chat_id, "\n".join(lines))
+        send_message(
+            chat_id, _category_picker_text(current), reply_markup=_category_keyboard(current)
+        )
         return
 
     resolved, unknown = parse_category_args(arg)
@@ -271,6 +319,43 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         if not _send_ranked(chat_id, conn, target, source):
             send_message(chat_id, _escape(_empty_view_message(target)))
     log.info("/category from %d → %s", chat_id, resolved or "[cleared]")
+
+
+def _handle_category_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    if payload == "done":
+        active = db.get_subscriber_value_filter(conn, chat_id) or []
+        if active:
+            final = f"Kategori satt till: {_escape(', '.join(active))}"
+        else:
+            final = _escape("Kategorifilter borttaget — alla kategorier visas.")
+        edit_message_text(chat_id, message_id, final)
+
+        target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+        if target:
+            source = db.get_subscriber_rank_source(conn, chat_id)
+            if not _send_ranked(chat_id, conn, target, source):
+                send_message(chat_id, _escape(_empty_view_message(target)))
+        log.info("/category callback done from %d → %s", chat_id, active or "[cleared]")
+        return
+
+    canonical = _CATEGORY_TOKENS.get(payload)
+    if canonical is None:
+        log.warning("Unknown category callback token: %r", payload)
+        return
+
+    current = db.get_subscriber_value_filter(conn, chat_id) or []
+    if canonical in current:
+        new = [c for c in current if c != canonical]
+    else:
+        new = current + [canonical]
+    db.set_subscriber_value_filter(conn, chat_id, new or None)
+
+    edit_message_text(
+        chat_id, message_id, _category_picker_text(new), reply_markup=_category_keyboard(new)
+    )
+    log.info("/category callback toggle %s from %d → %s", canonical, chat_id, new)
 
 
 def _handle_winetype(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -514,6 +599,9 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
 
 
 def _handle_update(update: dict, conn: psycopg.Connection) -> None:
+    if "callback_query" in update:
+        _handle_callback_query(update["callback_query"], conn)
+        return
     msg = update.get("message", {})
     text = msg.get("text", "")
     chat_id = msg.get("chat", {}).get("id")
@@ -523,6 +611,31 @@ def _handle_update(update: dict, conn: psycopg.Connection) -> None:
     handler = _HANDLERS.get(cmd)
     if handler is not None:
         handler(chat_id, text, conn)
+
+
+def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
+    query_id = query.get("id")
+    data = query.get("data", "")
+    msg = query.get("message", {})
+    chat_id = msg.get("chat", {}).get("id")
+    message_id = msg.get("message_id")
+
+    if not chat_id or not message_id or ":" not in data:
+        if query_id:
+            answer_callback_query(query_id)
+        return
+
+    prefix, _, payload = data.partition(":")
+    try:
+        if prefix == "src":
+            _handle_source_callback(chat_id, message_id, payload, conn)
+        elif prefix == "cat":
+            _handle_category_callback(chat_id, message_id, payload, conn)
+        else:
+            log.warning("Unknown callback prefix: %r", prefix)
+    finally:
+        if query_id:
+            answer_callback_query(query_id)
 
 
 def run() -> None:

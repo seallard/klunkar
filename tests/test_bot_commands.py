@@ -26,7 +26,18 @@ def fake_state(monkeypatch):
         past=[],
     )
 
-    monkeypatch.setattr(bot, "send_message", lambda chat_id, msg: sent.append((chat_id, msg)))
+    edits: list[tuple[int, int, str]] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+
+    def _edit(chat_id, message_id, msg, reply_markup=None):
+        edits.append((chat_id, message_id, msg))
+
+    monkeypatch.setattr(bot, "send_message", _send)
+    monkeypatch.setattr(bot, "edit_message_text", _edit)
+    monkeypatch.setattr(bot, "answer_callback_query", lambda qid, text=None: None)
+    state.edits = edits
     monkeypatch.setattr(bot.db, "get_subscriber_budget", lambda c, chat: state.budget)
     monkeypatch.setattr(bot.db, "get_subscriber_rank_source", lambda c, chat: state.rank_source)
     monkeypatch.setattr(bot.db, "get_subscriber_value_filter", lambda c, chat: state.value_filter)
@@ -53,6 +64,11 @@ def fake_state(monkeypatch):
         state.wine_type_filter = value
 
     monkeypatch.setattr(bot.db, "set_subscriber_wine_type_filter", _set_wine_type_filter)
+
+    def _set_rank_source(conn, chat, value):
+        state.rank_source = str(value)
+
+    monkeypatch.setattr(bot.db, "set_subscriber_rank_source", _set_rank_source)
 
     return state, sent
 
@@ -234,6 +250,92 @@ def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
 
     assert any("matchar dina filter" in msg for _, msg in sent)
     assert any("24 april 2026" in msg for _, msg in sent)
+
+
+# ---- inline callbacks ---------------------------------------------------
+
+
+def test_source_no_arg_sends_keyboard(fake_state, monkeypatch):
+    state, sent = fake_state
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+
+    bot._handle_source(123, "/source", MagicMock())
+
+    assert any("Välj rankningskälla" in m for _, m in sent)
+    keyboard = captured[-1].get("inline_keyboard", [])
+    flat = [btn["callback_data"] for row in keyboard for btn in row]
+    assert "src:vivino" in flat and "src:munskankarna" in flat
+
+
+def test_source_callback_writes_db_and_edits(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.rank_source = "munskankarna"
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
+    monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
+
+    bot._handle_source_callback(123, 42, "vivino", MagicMock())
+
+    assert state.rank_source == "vivino"
+    assert state.edits and state.edits[-1][1] == 42
+    assert "Vivino" in state.edits[-1][2]
+
+
+def test_category_callback_toggle_adds_value(fake_state):
+    state, sent = fake_state
+    state.value_filter = None
+
+    bot._handle_category_callback(123, 99, "fynd", MagicMock())
+
+    assert state.value_filter == ["fynd"]
+    assert state.edits[-1][1] == 99
+    assert "fynd" in state.edits[-1][2]
+
+
+def test_category_callback_toggle_removes_existing(fake_state):
+    state, sent = fake_state
+    state.value_filter = ["fynd", "prisvärt"]
+
+    bot._handle_category_callback(123, 99, "fynd", MagicMock())
+
+    assert state.value_filter == ["prisvärt"]
+
+
+def test_category_callback_done_sends_list(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.value_filter = ["fynd"]
+    called = {}
+
+    def fake_send_ranked(chat_id, conn, release_date, source):
+        called["args"] = (chat_id, release_date, source)
+        return True
+
+    monkeypatch.setattr(bot, "_send_ranked", fake_send_ranked)
+    monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
+
+    bot._handle_category_callback(123, 99, "done", MagicMock())
+
+    assert called["args"][0] == 123
+    # picker message edited away
+    assert state.edits[-1][1] == 99
+    assert "fynd" in state.edits[-1][2]
+
+
+def test_callback_unknown_prefix_is_no_op(fake_state):
+    state, sent = fake_state
+    query = {
+        "id": "abc",
+        "data": "xxx:foo",
+        "message": {"chat": {"id": 123}, "message_id": 99},
+    }
+    bot._handle_callback_query(query, MagicMock())
+    # nothing edited, nothing sent
+    assert state.edits == []
 
 
 # ---- /winetype ----------------------------------------------------------
