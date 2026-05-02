@@ -14,3 +14,11 @@ Telegram bot that notifies subscribers with the top 10 Vivino-rated wines from S
 | `/budget 150` | Only show wines under 150 kr |
 | `/budget` | Remove budget filter |
 | `/help` | Show this command list |
+
+## Development
+
+Enable git hooks (formats staged Python files on commit, runs tests on push):
+
+```sh
+bash scripts/install-hooks.sh
+```

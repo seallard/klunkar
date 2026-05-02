@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Run the full test suite before push.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+PY=".venv/bin/python"
+[ -x "$PY" ] || { echo "pre-push: $PY not found"; exit 1; }
+
+"$PY" -m pytest -q
