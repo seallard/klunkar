@@ -365,6 +365,80 @@ def test_winetype_callback_done_sends_list(fake_state, monkeypatch):
     assert "Rött vin" in state.edits[-1][2]
 
 
+def test_settings_sends_hub_keyboard(fake_state, monkeypatch):
+    state, sent = fake_state
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+
+    bot._handle_settings(456, MagicMock())
+
+    flat = [btn["callback_data"] for row in captured[-1].get("inline_keyboard", []) for btn in row]
+    assert "hub:src" in flat and "hub:wt" in flat and "hub:cat" in flat and "hub:bud" in flat
+
+
+def test_hub_open_re_renders_hub(fake_state):
+    state, sent = fake_state
+    bot._handle_hub_callback(123, 99, "open", MagicMock())
+    assert state.edits[-1][1] == 99
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_src_open_then_pick_writes_and_returns(fake_state):
+    state, _ = fake_state
+    state.rank_source = "munskankarna"
+
+    # Open the source picker from the hub
+    bot._handle_hub_callback(123, 99, "src", MagicMock())
+    assert "Välj rankningskälla" in state.edits[-1][2]
+
+    # Pick a source
+    bot._handle_hub_callback(123, 99, "src:vivino", MagicMock())
+    assert state.rank_source == "vivino"
+    # back to hub
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_bud_chip_writes_budget(fake_state):
+    state, _ = fake_state
+    bot._handle_hub_callback(123, 99, "bud:150", MagicMock())
+    assert state.budget == 150.0
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_bud_none_clears_budget(fake_state):
+    state, _ = fake_state
+    state.budget = 200.0
+    bot._handle_hub_callback(123, 99, "bud:none", MagicMock())
+    assert state.budget is None
+
+
+def test_hub_wt_toggle_then_done(fake_state):
+    state, _ = fake_state
+    state.wine_type_filter = None
+
+    bot._handle_hub_callback(123, 99, "wt:rod", MagicMock())
+    assert state.wine_type_filter == ["Rött vin"]
+    # still in picker (not hub)
+    assert "Välj vintyp" in state.edits[-1][2]
+
+    bot._handle_hub_callback(123, 99, "open", MagicMock())
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_cat_toggle_keeps_in_picker(fake_state):
+    state, _ = fake_state
+    state.value_filter = ["fynd"]
+
+    bot._handle_hub_callback(123, 99, "cat:fynd", MagicMock())
+    assert state.value_filter is None  # toggled off
+    assert "Välj kategori" in state.edits[-1][2]
+
+
 def test_callback_unknown_prefix_is_no_op(fake_state):
     state, sent = fake_state
     query = {

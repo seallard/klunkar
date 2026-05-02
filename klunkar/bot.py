@@ -188,13 +188,18 @@ def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     log.info("/budget from %d", chat_id)
 
 
-def _source_keyboard(current: Source) -> dict:
+def _source_keyboard(
+    current: Source, *, callback_prefix: str = "src", back_data: str | None = None
+) -> dict:
     row = []
     for s in Source:
         label = _source_label(s)
         prefix = "✅ " if s is current else ""
-        row.append({"text": f"{prefix}{label}", "callback_data": f"src:{s.value}"})
-    return {"inline_keyboard": [row]}
+        row.append({"text": f"{prefix}{label}", "callback_data": f"{callback_prefix}:{s.value}"})
+    rows = [row]
+    if back_data:
+        rows.append([{"text": "↩ Tillbaka", "callback_data": back_data}])
+    return {"inline_keyboard": rows}
 
 
 def _source_picker_text(current: Source) -> str:
@@ -265,20 +270,28 @@ def _category_picker_text(active: list[str]) -> str:
     return f"*Välj kategori*\n{body}"
 
 
-def _category_keyboard(active: list[str]) -> dict:
+def _category_keyboard(
+    active: list[str],
+    *,
+    callback_prefix: str = "cat",
+    done_label: str = "Klar — visa lista",
+    done_callback: str | None = None,
+) -> dict:
     active_set = set(active)
     rows: list[list[dict]] = []
     pair: list[dict] = []
     for canonical in _VALUE_CANONICAL:
         token = _CATEGORY_TOKEN_FROM_CANONICAL[canonical]
         prefix = "✅" if canonical in active_set else "◯"
-        pair.append({"text": f"{prefix} {canonical}", "callback_data": f"cat:{token}"})
+        pair.append(
+            {"text": f"{prefix} {canonical}", "callback_data": f"{callback_prefix}:{token}"}
+        )
         if len(pair) == 2:
             rows.append(pair)
             pair = []
     if pair:
         rows.append(pair)
-    rows.append([{"text": "Klar — visa lista", "callback_data": "cat:done"}])
+    rows.append([{"text": done_label, "callback_data": done_callback or f"{callback_prefix}:done"}])
     return {"inline_keyboard": rows}
 
 
@@ -375,20 +388,28 @@ def _winetype_picker_text(active: list[str]) -> str:
     return f"*Välj vintyp*\n{body}"
 
 
-def _winetype_keyboard(active: list[str]) -> dict:
+def _winetype_keyboard(
+    active: list[str],
+    *,
+    callback_prefix: str = "wt",
+    done_label: str = "Klar — visa lista",
+    done_callback: str | None = None,
+) -> dict:
     active_set = set(active)
     rows: list[list[dict]] = []
     pair: list[dict] = []
     for canonical in _WINE_TYPE_CANONICAL:
         token = _WINE_TYPE_TOKEN_FROM_CANONICAL[canonical]
         prefix = "✅" if canonical in active_set else "◯"
-        pair.append({"text": f"{prefix} {canonical}", "callback_data": f"wt:{token}"})
+        pair.append(
+            {"text": f"{prefix} {canonical}", "callback_data": f"{callback_prefix}:{token}"}
+        )
         if len(pair) == 2:
             rows.append(pair)
             pair = []
     if pair:
         rows.append(pair)
-    rows.append([{"text": "Klar — visa lista", "callback_data": "wt:done"}])
+    rows.append([{"text": done_label, "callback_data": done_callback or f"{callback_prefix}:done"}])
     return {"inline_keyboard": rows}
 
 
@@ -427,6 +448,144 @@ def _handle_winetype_callback(
         chat_id, message_id, _winetype_picker_text(new), reply_markup=_winetype_keyboard(new)
     )
     log.info("/winetype callback toggle %s from %d → %s", canonical, chat_id, new)
+
+
+def _handle_hub_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    """Dispatch hub:* callbacks. Payload is everything after `hub:`."""
+    sub, _, rest = payload.partition(":")
+
+    if sub == "open" or payload == "":
+        edit_message_text(
+            chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
+        )
+        return
+
+    if sub == "src":
+        if not rest:  # open source picker
+            current = db.get_subscriber_rank_source(conn, chat_id)
+            edit_message_text(
+                chat_id,
+                message_id,
+                _source_picker_text(current),
+                reply_markup=_source_keyboard(
+                    current, callback_prefix="hub:src", back_data="hub:open"
+                ),
+            )
+            return
+        try:
+            choice = Source(rest)
+        except ValueError:
+            log.warning("hub:src unknown value: %r", rest)
+            return
+        db.set_subscriber_rank_source(conn, chat_id, choice)
+        edit_message_text(
+            chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
+        )
+        log.info("hub:src %s from %d", choice, chat_id)
+        return
+
+    if sub == "wt":
+        if not rest:  # open
+            active = db.get_subscriber_wine_type_filter(conn, chat_id) or []
+            edit_message_text(
+                chat_id,
+                message_id,
+                _winetype_picker_text(active),
+                reply_markup=_winetype_keyboard(
+                    active,
+                    callback_prefix="hub:wt",
+                    done_label="↩ Klar",
+                    done_callback="hub:open",
+                ),
+            )
+            return
+        canonical = _WINE_TYPE_TOKENS.get(rest)
+        if canonical is None:
+            log.warning("hub:wt unknown token: %r", rest)
+            return
+        current = db.get_subscriber_wine_type_filter(conn, chat_id) or []
+        new = (
+            [c for c in current if c != canonical]
+            if canonical in current
+            else current + [canonical]
+        )
+        db.set_subscriber_wine_type_filter(conn, chat_id, new or None)
+        edit_message_text(
+            chat_id,
+            message_id,
+            _winetype_picker_text(new),
+            reply_markup=_winetype_keyboard(
+                new, callback_prefix="hub:wt", done_label="↩ Klar", done_callback="hub:open"
+            ),
+        )
+        log.info("hub:wt toggle %s from %d → %s", canonical, chat_id, new)
+        return
+
+    if sub == "cat":
+        if not rest:  # open
+            active = db.get_subscriber_value_filter(conn, chat_id) or []
+            edit_message_text(
+                chat_id,
+                message_id,
+                _category_picker_text(active),
+                reply_markup=_category_keyboard(
+                    active,
+                    callback_prefix="hub:cat",
+                    done_label="↩ Klar",
+                    done_callback="hub:open",
+                ),
+            )
+            return
+        canonical = _CATEGORY_TOKENS.get(rest)
+        if canonical is None:
+            log.warning("hub:cat unknown token: %r", rest)
+            return
+        current = db.get_subscriber_value_filter(conn, chat_id) or []
+        new = (
+            [c for c in current if c != canonical]
+            if canonical in current
+            else current + [canonical]
+        )
+        db.set_subscriber_value_filter(conn, chat_id, new or None)
+        edit_message_text(
+            chat_id,
+            message_id,
+            _category_picker_text(new),
+            reply_markup=_category_keyboard(
+                new, callback_prefix="hub:cat", done_label="↩ Klar", done_callback="hub:open"
+            ),
+        )
+        log.info("hub:cat toggle %s from %d → %s", canonical, chat_id, new)
+        return
+
+    if sub == "bud":
+        if not rest:  # open chips
+            current = db.get_subscriber_budget(conn, chat_id)
+            edit_message_text(
+                chat_id,
+                message_id,
+                _budget_picker_text(current),
+                reply_markup=_budget_chips_keyboard(current),
+            )
+            return
+        if rest == "none":
+            db.set_subscriber_budget(conn, chat_id, None)
+        else:
+            try:
+                amount = float(rest)
+            except ValueError:
+                log.warning("hub:bud unknown value: %r", rest)
+                return
+            db.set_subscriber_budget(conn, chat_id, amount)
+        edit_message_text(
+            chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
+        )
+        log.info("hub:bud %s from %d", rest, chat_id)
+        return
+
+    log.warning("Unknown hub subcommand: %r", sub)
 
 
 def _handle_winetype(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -577,7 +736,7 @@ def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/releases from %d (upcoming=%d, past=%d)", chat_id, len(upcoming), len(past))
 
 
-def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
+def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
     source = db.get_subscriber_rank_source(conn, chat_id)
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
@@ -593,17 +752,68 @@ def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
     type_text = ", ".join(wine_type_filter) if wine_type_filter else "alla"
     next_text = _sv_date(next_release) if next_release else "okänt"
 
-    lines = [
-        "🍷 *Dina inställningar*",
-        "",
-        f"*Källa:* {_escape(_source_label(source))}",
-        f"*Budget:* {_escape(budget_text)}",
-        f"*Vintyp:* {_escape(type_text)}",
-        f"*Kategori:* {_escape(category_text)}",
-        "",
-        f"*Nästa släpp:* {_escape(next_text)}",
-    ]
-    send_message(chat_id, "\n".join(lines))
+    return "\n".join(
+        [
+            "🍷 *Dina inställningar*",
+            "",
+            f"*Källa:* {_escape(_source_label(source))}",
+            f"*Budget:* {_escape(budget_text)}",
+            f"*Vintyp:* {_escape(type_text)}",
+            f"*Kategori:* {_escape(category_text)}",
+            "",
+            f"*Nästa släpp:* {_escape(next_text)}",
+        ]
+    )
+
+
+def _hub_keyboard() -> dict:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Ändra källa", "callback_data": "hub:src"},
+                {"text": "Ändra vintyp", "callback_data": "hub:wt"},
+            ],
+            [
+                {"text": "Ändra kategori", "callback_data": "hub:cat"},
+                {"text": "Ändra budget", "callback_data": "hub:bud"},
+            ],
+        ]
+    }
+
+
+_BUDGET_CHIPS: list[int | None] = [150, 250, 500, None]
+
+
+def _budget_chips_keyboard(current: float | None) -> dict:
+    rows: list[list[dict]] = []
+    pair: list[dict] = []
+    for chip in _BUDGET_CHIPS:
+        if chip is None:
+            label = "Ingen"
+            payload = "none"
+            active = current is None
+        else:
+            label = f"{chip} kr"
+            payload = str(chip)
+            active = current is not None and int(current) == chip
+        prefix = "✅ " if active else ""
+        pair.append({"text": f"{prefix}{label}", "callback_data": f"hub:bud:{payload}"})
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([{"text": "↩ Tillbaka", "callback_data": "hub:open"}])
+    return {"inline_keyboard": rows}
+
+
+def _budget_picker_text(current: float | None) -> str:
+    body = f"Aktiv: {int(current)} kr" if current is not None else _escape("Aktiv: ingen")
+    return f"*Välj budget*\n{body}"
+
+
+def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
+    send_message(chat_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard())
     log.info("/settings from %d", chat_id)
 
 
@@ -694,6 +904,8 @@ def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
             _handle_category_callback(chat_id, message_id, payload, conn)
         elif prefix == "wt":
             _handle_winetype_callback(chat_id, message_id, payload, conn)
+        elif prefix == "hub":
+            _handle_hub_callback(chat_id, message_id, payload, conn)
         else:
             log.warning("Unknown callback prefix: %r", prefix)
     finally:
