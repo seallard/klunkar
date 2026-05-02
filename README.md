@@ -13,10 +13,12 @@
 
 ## Example
 
-A typical `/recent` reply, showing the top wines from the last release:
+A `/recent` reply by default — and the same list once a budget and Munskänkarna value-category filter are applied:
 
 <p align="center">
-  <img src="docs/list.png" alt="example /recent output in Telegram" width="380"/>
+  <img src="docs/recent_list.png" alt="default /recent list" height="520"/>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="docs/recent_filters.png" alt="/recent with budget and category filters applied" height="520"/>
 </p>
 
 ## Commands
