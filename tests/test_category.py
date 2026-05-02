@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from klunkar import ranking
 from klunkar.bot import parse_category_args
-from klunkar.models import MunskankarnaPayload, RankedWine, VivinoPayload, Wine
+from klunkar.models import MunskankarnaPayload, RankedWine, Wine
 from klunkar.release import format_message
 
 RD = date(2026, 4, 24)
@@ -11,13 +11,19 @@ RD = date(2026, 4, 24)
 
 def _wine(num, name="W", price=200.0):
     return Wine(
-        sb_product_number=num, sb_product_id=num, release_date=RD,
-        name=name, producer="P", sb_url=f"https://sb/{num}",
-        price=price, wine_type="Rött vin",
+        sb_product_number=num,
+        sb_product_id=num,
+        release_date=RD,
+        name=name,
+        producer="P",
+        sb_url=f"https://sb/{num}",
+        price=price,
+        wine_type="Rött vin",
     )
 
 
 # ---- parse_category_args -------------------------------------------------
+
 
 def test_parse_simple():
     assert parse_category_args("fynd") == (["fynd"], [])
@@ -59,14 +65,19 @@ def test_parse_case_insensitive():
 
 # ---- ranking with value_ratings filter -----------------------------------
 
+
 def _vivino(avg=4.0, count=100):
-    return {"wine_id": 1, "matched_name": "m", "ratings_average": avg,
-            "ratings_count": count, "wine_url": "https://v/1"}
+    return {
+        "wine_id": 1,
+        "matched_name": "m",
+        "ratings_average": avg,
+        "ratings_count": count,
+        "wine_url": "https://v/1",
+    }
 
 
 def _msk(score, value):
-    return {"score": score, "value_rating": value, "tasting_note": "n",
-            "review_url": "https://m/1"}
+    return {"score": score, "value_rating": value, "tasting_note": "n", "review_url": "https://m/1"}
 
 
 def test_value_ratings_filter_drops_non_matches(monkeypatch):
@@ -77,7 +88,10 @@ def test_value_ratings_filter_drops_non_matches(monkeypatch):
     ]
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(
-        MagicMock(), RD, source="munskankarna", value_ratings={"fynd", "prisvärt"},
+        MagicMock(),
+        RD,
+        source="munskankarna",
+        value_ratings={"fynd", "prisvärt"},
     )
     assert {r.wine.sb_product_number for r in out} == {"1", "3"}
 
@@ -85,19 +99,28 @@ def test_value_ratings_filter_drops_non_matches(monkeypatch):
 def test_value_ratings_filter_excludes_wines_without_munskankarna(monkeypatch):
     """When ranked by Vivino with category=fynd, only wines with both qualify."""
     rows = [
-        (_wine("1"), {
-            "vivino": _vivino(4.5, 200),
-            "munskankarna": _msk(17, "fynd"),
-        }),
+        (
+            _wine("1"),
+            {
+                "vivino": _vivino(4.5, 200),
+                "munskankarna": _msk(17, "fynd"),
+            },
+        ),
         (_wine("2"), {"vivino": _vivino(4.3, 100)}),  # no munskankarna
-        (_wine("3"), {
-            "vivino": _vivino(4.2, 50),
-            "munskankarna": _msk(14, "prisvärt"),
-        }),
+        (
+            _wine("3"),
+            {
+                "vivino": _vivino(4.2, 50),
+                "munskankarna": _msk(14, "prisvärt"),
+            },
+        ),
     ]
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(
-        MagicMock(), RD, source="vivino", value_ratings={"fynd"},
+        MagicMock(),
+        RD,
+        source="vivino",
+        value_ratings={"fynd"},
     )
     assert [r.wine.sb_product_number for r in out] == ["1"]
 
@@ -114,15 +137,18 @@ def test_value_ratings_none_means_no_filter(monkeypatch):
 
 # ---- format_message header shows the filter ------------------------------
 
+
 def test_format_message_shows_active_filter():
     rw = RankedWine(
         wine=_wine("1", "X"),
         rank_score=15,
-        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd",
-                                         review_url="https://m/1"),
+        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd", review_url="https://m/1"),
     )
     out = format_message(
-        [rw], RD, source="munskankarna", value_ratings={"fynd", "prisvärt"},
+        [rw],
+        RD,
+        source="munskankarna",
+        value_ratings={"fynd", "prisvärt"},
     )
     assert "Kategori: fynd, prisvärt" in out
 
@@ -131,8 +157,7 @@ def test_format_message_omits_filter_when_none():
     rw = RankedWine(
         wine=_wine("1", "X"),
         rank_score=15,
-        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd",
-                                         review_url="https://m/1"),
+        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd", review_url="https://m/1"),
     )
     out = format_message([rw], RD, source="munskankarna")
     assert "Kategori" not in out

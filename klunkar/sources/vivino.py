@@ -36,9 +36,11 @@ class VivinoEnricher:
                 ratings_count=match.ratings_count,
                 wine_url=match.wine_url,
             )
-            results.append(EnrichmentResult(
-                sb_product_number=w.sb_product_number,
-                confidence=match.fuzz_score / 100.0,
-                payload=payload.model_dump(),
-            ))
+            results.append(
+                EnrichmentResult(
+                    sb_product_number=w.sb_product_number,
+                    confidence=match.fuzz_score / 100.0,
+                    payload=payload.model_dump(),
+                )
+            )
         return results

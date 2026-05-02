@@ -52,8 +52,6 @@ _STRIP_SUFFIXES = re.compile(
     r"\s+(winery|estate|estates|vineyard|vineyards|wines?|viticultore|viticultori|wine\s+company.*"
     r"|family|gmbh|sas|wein|ltd\.?|lda\.?)$",
     re.IGNORECASE,
-
-
 )
 
 
@@ -87,8 +85,21 @@ def _slugify(name: str) -> str:
 
 
 _GENERIC_WORDS = {
-    "domaine", "chateau", "château", "bodega", "bodegas", "weingut", "quinta",
-    "tenuta", "fattoria", "maison", "cantina", "cave", "caves", "poderi", "domaines",
+    "domaine",
+    "chateau",
+    "château",
+    "bodega",
+    "bodegas",
+    "weingut",
+    "quinta",
+    "tenuta",
+    "fattoria",
+    "maison",
+    "cantina",
+    "cave",
+    "caves",
+    "poderi",
+    "domaines",
 }
 
 
@@ -145,7 +156,12 @@ def _fetch_wines(
             cache[slug] = None
             return None
         if r.status_code == 403:
-            log.warning("Vivino 403 for %s (attempt %d/%d), re-priming session…", slug, attempt + 1, _MAX_RETRIES)
+            log.warning(
+                "Vivino 403 for %s (attempt %d/%d), re-priming session…",
+                slug,
+                attempt + 1,
+                _MAX_RETRIES,
+            )
             prime_session(client)
             time.sleep(random.uniform(*_RETRY_DELAY_RANGE))
             continue
@@ -168,7 +184,11 @@ def lookup(
     cache: dict[str, list[dict] | None],
 ) -> VivinoMatch | None:
     wines = next(
-        (w for slug in _slug_candidates(producer) if (w := _fetch_wines(slug, client, cache)) is not None),
+        (
+            w
+            for slug in _slug_candidates(producer)
+            if (w := _fetch_wines(slug, client, cache)) is not None
+        ),
         None,
     )
     if not wines:

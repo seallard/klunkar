@@ -32,9 +32,7 @@ def migrate(conn: psycopg.Connection) -> None:
         cur.execute(
             "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS rank_source TEXT NOT NULL DEFAULT 'munskankarna'"
         )
-        cur.execute(
-            "ALTER TABLE subscribers ALTER COLUMN rank_source SET DEFAULT 'munskankarna'"
-        )
+        cur.execute("ALTER TABLE subscribers ALTER COLUMN rank_source SET DEFAULT 'munskankarna'")
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS value_filter TEXT[]")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS seen_releases (
@@ -144,6 +142,7 @@ def _apply_once(cur: psycopg.Cursor, name: str, sql: str) -> None:
 
 # ---- APIM key (unchanged) -----------------------------------------------
 
+
 def get_apim_key(conn: psycopg.Connection) -> str | None:
     with conn.cursor() as cur:
         cur.execute("SELECT key FROM apim_key WHERE id = 1")
@@ -164,6 +163,7 @@ def set_apim_key(conn: psycopg.Connection, key: str) -> None:
 
 
 # ---- Releases (seen / upcoming) -----------------------------------------
+
 
 def is_release_seen(conn: psycopg.Connection, release_date: date) -> bool:
     with conn.cursor() as cur:
@@ -214,9 +214,7 @@ def save_release_dates(conn: psycopg.Connection, dates: list[date]) -> None:
 
 def is_upcoming_release_date(conn: psycopg.Connection, release_date: date) -> bool:
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM upcoming_release_dates WHERE release_date = %s", (release_date,)
-        )
+        cur.execute("SELECT 1 FROM upcoming_release_dates WHERE release_date = %s", (release_date,))
         return cur.fetchone() is not None
 
 
@@ -230,6 +228,7 @@ def get_upcoming_release_dates(conn: psycopg.Connection, from_date: date) -> lis
 
 
 # ---- Wines + enrichments ------------------------------------------------
+
 
 def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
     if not wines:
@@ -250,8 +249,14 @@ def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
             """,
             [
                 (
-                    w.release_date, w.sb_product_number, w.sb_product_id,
-                    w.name, w.producer, w.sb_url, w.price, w.wine_type,
+                    w.release_date,
+                    w.sb_product_number,
+                    w.sb_product_id,
+                    w.name,
+                    w.producer,
+                    w.sb_url,
+                    w.price,
+                    w.wine_type,
                 )
                 for w in wines
             ],
@@ -275,8 +280,14 @@ def get_wines(conn: psycopg.Connection, release_date: date) -> list[Wine]:
         )
         return [
             Wine(
-                release_date=r[0], sb_product_number=r[1], sb_product_id=r[2],
-                name=r[3], producer=r[4], sb_url=r[5], price=r[6], wine_type=r[7],
+                release_date=r[0],
+                sb_product_number=r[1],
+                sb_product_id=r[2],
+                name=r[3],
+                producer=r[4],
+                sb_url=r[5],
+                price=r[6],
+                wine_type=r[7],
             )
             for r in cur.fetchall()
         ]
@@ -366,8 +377,14 @@ def get_wines_with_enrichments(
         out: list[tuple[Wine, dict[str, dict[str, Any]]]] = []
         for r in cur.fetchall():
             wine = Wine(
-                release_date=r[0], sb_product_number=r[1], sb_product_id=r[2],
-                name=r[3], producer=r[4], sb_url=r[5], price=r[6], wine_type=r[7],
+                release_date=r[0],
+                sb_product_number=r[1],
+                sb_product_id=r[2],
+                name=r[3],
+                producer=r[4],
+                sb_url=r[5],
+                price=r[6],
+                wine_type=r[7],
             )
             payloads = r[8] if isinstance(r[8], dict) else json.loads(r[8])
             out.append((wine, payloads))
@@ -392,16 +409,12 @@ def wipe_release(conn: psycopg.Connection, release_date: date) -> tuple[int, int
     with conn.transaction(), conn.cursor() as cur:
         cur.execute("DELETE FROM wines WHERE release_date = %s", (release_date,))
         wines_deleted = cur.rowcount
-        cur.execute(
-            "DELETE FROM enrichment_runs WHERE release_date = %s", (release_date,)
-        )
+        cur.execute("DELETE FROM enrichment_runs WHERE release_date = %s", (release_date,))
         runs_deleted = cur.rowcount
     return wines_deleted, runs_deleted
 
 
-def get_past_release_dates_with_data(
-    conn: psycopg.Connection, since: date
-) -> list[date]:
+def get_past_release_dates_with_data(conn: psycopg.Connection, since: date) -> list[date]:
     """Distinct release dates in [since, today) that have rows in `wines`."""
     with conn.cursor() as cur:
         cur.execute(
@@ -417,9 +430,13 @@ def get_past_release_dates_with_data(
 
 # ---- Subscribers --------------------------------------------------------
 
+
 def _row_to_subscriber(row: tuple) -> Subscriber:
     return Subscriber(
-        chat_id=row[0], max_price=row[1], rank_source=row[2], value_filter=row[3],
+        chat_id=row[0],
+        max_price=row[1],
+        rank_source=row[2],
+        value_filter=row[3],
     )
 
 
@@ -429,9 +446,7 @@ def get_subscribers(conn: psycopg.Connection) -> list[Subscriber]:
         return [_row_to_subscriber(r) for r in cur.fetchall()]
 
 
-def get_subscribers_to_notify_for(
-    conn: psycopg.Connection, release_date: date
-) -> list[Subscriber]:
+def get_subscribers_to_notify_for(conn: psycopg.Connection, release_date: date) -> list[Subscriber]:
     """Subscribers who joined before `release_date` and haven't been notified for it.
 
     Excludes recently-joined subscribers — they were not eligible at the original
@@ -485,9 +500,7 @@ def set_subscriber_rank_source(
         )
 
 
-def get_subscriber_value_filter(
-    conn: psycopg.Connection, chat_id: int
-) -> list[str] | None:
+def get_subscriber_value_filter(conn: psycopg.Connection, chat_id: int) -> list[str] | None:
     with conn.cursor() as cur:
         cur.execute("SELECT value_filter FROM subscribers WHERE chat_id = %s", (chat_id,))
         row = cur.fetchone()
@@ -531,14 +544,13 @@ def set_subscriber_preview_date(conn: psycopg.Connection, chat_id: int, release_
 
 def get_subscriber_preview_date(conn: psycopg.Connection, chat_id: int) -> date | None:
     with conn.cursor() as cur:
-        cur.execute(
-            "SELECT last_preview_date FROM subscribers WHERE chat_id = %s", (chat_id,)
-        )
+        cur.execute("SELECT last_preview_date FROM subscribers WHERE chat_id = %s", (chat_id,))
         row = cur.fetchone()
         return row[0] if row else None
 
 
 # ---- Last release helper (replaces get_last_release_wines) --------------
+
 
 def get_last_release_with_data(
     conn: psycopg.Connection, max_age_days: int | None = None

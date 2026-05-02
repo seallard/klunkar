@@ -16,8 +16,18 @@ _BASE = "https://www.munskankarna.se"
 _RELEASE_URL = _BASE + "/sv/vinlocus/tillfalligt-sortiment-{slug}"
 
 _MONTHS_SV = [
-    "januari", "februari", "mars", "april", "maj", "juni",
-    "juli", "augusti", "september", "oktober", "november", "december",
+    "januari",
+    "februari",
+    "mars",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "augusti",
+    "september",
+    "oktober",
+    "november",
+    "december",
 ]
 
 _VALUE_RATINGS = {"fynd", "mer än prisvärt", "prisvärt", "ej prisvärt"}
@@ -114,7 +124,9 @@ class MunskankarnaEnricher:
 
         log.info(
             "Munskänkarna parsed %d wines from %s; matching against %d SB wines",
-            len(rows_by_number), url, len(wines),
+            len(rows_by_number),
+            url,
+            len(wines),
         )
 
         results: list[EnrichmentResult] = []
@@ -122,9 +134,11 @@ class MunskankarnaEnricher:
             payload = rows_by_number.get(w.sb_product_number)
             if payload is None:
                 continue
-            results.append(EnrichmentResult(
-                sb_product_number=w.sb_product_number,
-                confidence=1.0,
-                payload=payload.model_dump(),
-            ))
+            results.append(
+                EnrichmentResult(
+                    sb_product_number=w.sb_product_number,
+                    confidence=1.0,
+                    payload=payload.model_dump(),
+                )
+            )
         return results

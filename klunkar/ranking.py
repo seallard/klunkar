@@ -65,7 +65,7 @@ def build_ranked_view(
     source: Source | str,
     value_ratings: set[str] | None = None,
 ) -> list[RankedWine]:
-    source = Source(source)   # accept string at the boundary (CLI, DB)
+    source = Source(source)  # accept string at the boundary (CLI, DB)
     rows = db.get_wines_with_enrichments(conn, release_date)
     vivino_global_mean = _vivino_global_mean(rows) if source is Source.VIVINO else 0.0
 
@@ -79,20 +79,31 @@ def build_ranked_view(
                 continue
 
         rank_score, tiebreak = _score_for(
-            source, payloads[source], wine, vivino_global_mean=vivino_global_mean,
+            source,
+            payloads[source],
+            wine,
+            vivino_global_mean=vivino_global_mean,
         )
-        scored.append((rank_score, tiebreak, RankedWine(
-            wine=wine,
-            rank_score=rank_score,
-            vivino=(
-                VivinoPayload(**payloads[Source.VIVINO])
-                if Source.VIVINO in payloads else None
-            ),
-            munskankarna=(
-                MunskankarnaPayload(**payloads[Source.MUNSKANKARNA])
-                if Source.MUNSKANKARNA in payloads else None
-            ),
-        )))
+        scored.append(
+            (
+                rank_score,
+                tiebreak,
+                RankedWine(
+                    wine=wine,
+                    rank_score=rank_score,
+                    vivino=(
+                        VivinoPayload(**payloads[Source.VIVINO])
+                        if Source.VIVINO in payloads
+                        else None
+                    ),
+                    munskankarna=(
+                        MunskankarnaPayload(**payloads[Source.MUNSKANKARNA])
+                        if Source.MUNSKANKARNA in payloads
+                        else None
+                    ),
+                ),
+            )
+        )
 
     scored.sort(key=lambda t: (-t[0], t[1]))
     return [r for _, _, r in scored]

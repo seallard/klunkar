@@ -1,4 +1,5 @@
 """Regression tests for _parse_product — guards the join key against Munskänkarna."""
+
 from klunkar import systembolaget
 
 

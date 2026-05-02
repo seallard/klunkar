@@ -3,6 +3,7 @@
 DB and Telegram are mocked; we assert on the messages sent and the DB
 state changes triggered by each branch.
 """
+
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -23,26 +24,23 @@ def fake_state(monkeypatch):
         upcoming=[],
     )
 
-    monkeypatch.setattr(bot, "send_message",
-                        lambda chat_id, msg: sent.append((chat_id, msg)))
-    monkeypatch.setattr(bot.db, "get_subscriber_budget",
-                        lambda c, chat: state.budget)
-    monkeypatch.setattr(bot.db, "get_subscriber_rank_source",
-                        lambda c, chat: state.rank_source)
-    monkeypatch.setattr(bot.db, "get_subscriber_value_filter",
-                        lambda c, chat: state.value_filter)
-    monkeypatch.setattr(bot.db, "get_upcoming_release_dates",
-                        lambda c, since: state.upcoming)
+    monkeypatch.setattr(bot, "send_message", lambda chat_id, msg: sent.append((chat_id, msg)))
+    monkeypatch.setattr(bot.db, "get_subscriber_budget", lambda c, chat: state.budget)
+    monkeypatch.setattr(bot.db, "get_subscriber_rank_source", lambda c, chat: state.rank_source)
+    monkeypatch.setattr(bot.db, "get_subscriber_value_filter", lambda c, chat: state.value_filter)
+    monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
     monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: None)
     monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
     monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: None)
 
     def _set_budget(conn, chat, value):
         state.budget = value
+
     monkeypatch.setattr(bot.db, "set_subscriber_budget", _set_budget)
 
     def _set_value_filter(conn, chat, value):
         state.value_filter = value
+
     monkeypatch.setattr(bot.db, "set_subscriber_value_filter", _set_value_filter)
 
     return state, sent
@@ -50,13 +48,14 @@ def fake_state(monkeypatch):
 
 # ---- /budget ------------------------------------------------------------
 
+
 def test_budget_no_arg_shows_current_does_not_clear(fake_state):
     state, sent = fake_state
     state.budget = 200.0
 
     bot._handle_budget(123, "/budget", MagicMock())
 
-    assert state.budget == 200.0   # not cleared
+    assert state.budget == 200.0  # not cleared
     assert any("Aktuell budget: 200 kr" in msg for _, msg in sent)
     assert any("/clear" in msg for _, msg in sent)
 
@@ -77,7 +76,7 @@ def test_budget_clear_word_is_invalid_amount(fake_state):
 
     bot._handle_budget(123, "/budget clear", MagicMock())
 
-    assert state.budget == 200.0   # unchanged
+    assert state.budget == 200.0  # unchanged
     assert any("giltigt belopp" in msg for _, msg in sent)
 
 
@@ -92,11 +91,12 @@ def test_budget_invalid_value(fake_state):
     state, sent = fake_state
     state.budget = 200.0
     bot._handle_budget(123, "/budget abc", MagicMock())
-    assert state.budget == 200.0   # unchanged
+    assert state.budget == 200.0  # unchanged
     assert any("giltigt belopp" in msg for _, msg in sent)
 
 
 # ---- /clear -------------------------------------------------------------
+
 
 def test_clear_resets_budget_and_category(fake_state, monkeypatch):
     state, sent = fake_state
@@ -122,7 +122,7 @@ def test_clear_preserves_source(fake_state, monkeypatch):
 
     bot._handle_clear(123, MagicMock())
 
-    assert state.rank_source == "vivino"   # source untouched
+    assert state.rank_source == "vivino"  # source untouched
     assert any("Vivino" in msg for _, msg in sent)
 
 
@@ -140,6 +140,7 @@ def test_clear_command_is_dispatched():
 
 
 # ---- /settings ----------------------------------------------------------
+
 
 def test_settings_reports_all_fields(fake_state):
     state, sent = fake_state
@@ -172,6 +173,7 @@ def test_settings_handles_unset_state(fake_state):
 
 # ---- _empty_view_message -----------------------------------------------
 
+
 def test_empty_view_message_mentions_filters_and_settings():
     msg = bot._empty_view_message(date(2026, 4, 24))
     assert "matchar dina filter" in msg
@@ -180,6 +182,7 @@ def test_empty_view_message_mentions_filters_and_settings():
 
 
 # ---- /recent ------------------------------------------------------------
+
 
 def test_recent_no_past_release(fake_state, monkeypatch):
     _, sent = fake_state
@@ -223,6 +226,7 @@ def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
 
 
 # ---- handler dispatch ---------------------------------------------------
+
 
 def test_settings_command_is_dispatched():
     assert "/settings" in bot._HANDLERS

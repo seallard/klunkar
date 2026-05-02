@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 # ---- APIM key resolve ---------------------------------------------------
 
+
 def _resolve_apim_key(conn: psycopg.Connection, client: httpx.Client) -> str:
     key = db.get_apim_key(conn)
     if not key:
@@ -40,9 +41,8 @@ def _fetch_with_key_refresh(
 
 # ---- Wine ingest --------------------------------------------------------
 
-def _wines_from_products(
-    release_date: date, products: list[systembolaget.SBProduct]
-) -> list[Wine]:
+
+def _wines_from_products(release_date: date, products: list[systembolaget.SBProduct]) -> list[Wine]:
     return [
         Wine(
             sb_product_number=p.product_number,
@@ -59,6 +59,7 @@ def _wines_from_products(
 
 
 # ---- Enrichment policy --------------------------------------------------
+
 
 def _should_run(conn: psycopg.Connection, release_date: date, source: str) -> bool:
     last = db.get_last_run(conn, release_date, source)
@@ -108,6 +109,7 @@ def _run_enrichers(
 
 
 # ---- Public orchestration -----------------------------------------------
+
 
 def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
     """Scrape upcoming releases, persist wines, run all enrichers (idempotent)."""
@@ -170,19 +172,26 @@ def _notify_subscribers(
             continue
         value_set = set(sub.value_filter) if sub.value_filter else None
         ranked = ranking.build_ranked_view(
-            conn, release_date, source=sub.rank_source, value_ratings=value_set,
+            conn,
+            release_date,
+            source=sub.rank_source,
+            value_ratings=value_set,
         )
         if not ranked:
             log.info(
                 "%sNo %s-ranked wines for %s — skipping chat %d",
-                log_prefix, sub.rank_source, release_date, sub.chat_id,
+                log_prefix,
+                sub.rank_source,
+                release_date,
+                sub.chat_id,
             )
             continue
         try:
             send_message(
                 sub.chat_id,
                 format_message(
-                    ranked, release_date,
+                    ranked,
+                    release_date,
                     source=sub.rank_source,
                     max_price=sub.max_price,
                     value_ratings=value_set,
@@ -236,8 +245,18 @@ def check_and_notify(conn: psycopg.Connection) -> bool:
 _MDV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
 
 _MONTHS_SV = [
-    "januari", "februari", "mars", "april", "maj", "juni",
-    "juli", "augusti", "september", "oktober", "november", "december",
+    "januari",
+    "februari",
+    "mars",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "augusti",
+    "september",
+    "oktober",
+    "november",
+    "december",
 ]
 
 _WINE_GLASS = {

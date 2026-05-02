@@ -6,10 +6,9 @@ from typing import Annotated
 import httpx
 import typer
 
-from klunkar import config, db, ranking, release, systembolaget
+from klunkar import config, db, ranking, release
 from klunkar.bot import parse_category_args, run as run_bot
 from klunkar.models import Source
-from klunkar.sources import ENRICHERS
 
 app = typer.Typer()
 subscribers_app = typer.Typer()
@@ -64,9 +63,7 @@ def _resolve_source(name: str) -> Source:
 @app.command("enrich")
 def enrich(
     release_date: Annotated[str | None, typer.Option("--date")] = None,
-    only: Annotated[
-        str | None, typer.Option("--source", help="Run only this enricher")
-    ] = None,
+    only: Annotated[str | None, typer.Option("--source", help="Run only this enricher")] = None,
     force: Annotated[bool, typer.Option("--force")] = False,
     scrape_wines: Annotated[
         bool,
@@ -96,8 +93,12 @@ def enrich(
 
 @app.command("refetch")
 def refetch(
-    release_date: Annotated[str, typer.Argument(help="Release date (YYYY-MM-DD) to wipe and re-fetch")],
-    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip the interactive confirmation")] = False,
+    release_date: Annotated[
+        str, typer.Argument(help="Release date (YYYY-MM-DD) to wipe and re-fetch")
+    ],
+    yes: Annotated[
+        bool, typer.Option("--yes", "-y", help="Skip the interactive confirmation")
+    ] = False,
 ) -> None:
     """Wipe a release and re-fetch from scratch (Systembolaget + all enrichers).
 
@@ -161,14 +162,22 @@ def preview(
             typer.echo(f"No wines stored for {target} — run enrich/check-release first.")
             raise typer.Exit(1)
         wines = ranking.build_ranked_view(
-            conn, target, source=src, value_ratings=value_set,
+            conn,
+            target,
+            source=src,
+            value_ratings=value_set,
         )
         if not wines:
             typer.echo(f"No {src}-ranked wines for {target} matching filters.")
             raise typer.Exit(1)
-        typer.echo(release.format_message(
-            wines, target, source=src, value_ratings=value_set,
-        ))
+        typer.echo(
+            release.format_message(
+                wines,
+                target,
+                source=src,
+                value_ratings=value_set,
+            )
+        )
 
 
 @app.command("bot")
@@ -184,7 +193,5 @@ def subscribers_list() -> None:
         subs = db.get_subscribers(conn)
     for s in subs:
         cats = ",".join(s.value_filter) if s.value_filter else "-"
-        typer.echo(
-            f"{s.chat_id}\tbudget={s.max_price}\tsource={s.rank_source}\tcategory={cats}"
-        )
+        typer.echo(f"{s.chat_id}\tbudget={s.max_price}\tsource={s.rank_source}\tcategory={cats}")
     typer.echo(f"Total: {len(subs)}")

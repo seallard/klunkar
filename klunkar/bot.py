@@ -9,7 +9,6 @@ import psycopg
 from klunkar import config, db, ranking
 from klunkar.models import Source
 from klunkar.release import _escape, _source_label, _sv_date, format_message
-from klunkar.sources import ENRICHERS
 from klunkar.telegram import send_message
 
 log = logging.getLogger(__name__)
@@ -74,7 +73,10 @@ def _send_ranked(
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     value_set = set(value_filter) if value_filter else None
     ranked = ranking.build_ranked_view(
-        conn, release_date, source=source, value_ratings=value_set,
+        conn,
+        release_date,
+        source=source,
+        value_ratings=value_set,
     )
     if not ranked:
         return False
@@ -82,8 +84,11 @@ def _send_ranked(
     send_message(
         chat_id,
         format_message(
-            ranked, release_date,
-            source=source, max_price=max_price, value_ratings=value_set,
+            ranked,
+            release_date,
+            source=source,
+            max_price=max_price,
+            value_ratings=value_set,
         ),
     )
     return True
@@ -207,8 +212,7 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         send_message(
             chat_id,
             _escape(
-                f"Okänd kategori: {', '.join(unknown)}. "
-                f"Giltiga: {', '.join(_VALUE_CANONICAL)}."
+                f"Okänd kategori: {', '.join(unknown)}. Giltiga: {', '.join(_VALUE_CANONICAL)}."
             ),
         )
         return
@@ -249,10 +253,7 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     else:
         send_message(
             chat_id,
-            _escape(
-                f"Filter rensade: {', '.join(cleared)}.\n"
-                f"Källa kvar: {_source_label(source)}."
-            ),
+            _escape(f"Filter rensade: {', '.join(cleared)}.\nKälla kvar: {_source_label(source)}."),
         )
 
         target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
@@ -375,17 +376,17 @@ def _handle_stop(chat_id: int, conn: psycopg.Connection) -> None:
 
 
 _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
-    "/start":    lambda c, t, conn: _handle_start(c, conn),
-    "/budget":   _handle_budget,
-    "/source":   _handle_source,
+    "/start": lambda c, t, conn: _handle_start(c, conn),
+    "/budget": _handle_budget,
+    "/source": _handle_source,
     "/category": _handle_category,
-    "/clear":    lambda c, t, conn: _handle_clear(c, conn),
-    "/preview":  _handle_preview,
-    "/recent":   lambda c, t, conn: _handle_recent(c, conn),
+    "/clear": lambda c, t, conn: _handle_clear(c, conn),
+    "/preview": _handle_preview,
+    "/recent": lambda c, t, conn: _handle_recent(c, conn),
     "/releases": lambda c, t, conn: _handle_releases(c, conn),
     "/settings": lambda c, t, conn: _handle_settings(c, conn),
-    "/help":     lambda c, t, conn: _handle_help(c),
-    "/stop":     lambda c, t, conn: _handle_stop(c, conn),
+    "/help": lambda c, t, conn: _handle_help(c),
+    "/stop": lambda c, t, conn: _handle_stop(c, conn),
 }
 
 

@@ -3,7 +3,8 @@
 Mocks all DB and Telegram interactions so we can exercise the orchestration
 logic without spinning up Postgres.
 """
-from datetime import date, datetime, timedelta, timezone
+
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -22,14 +23,14 @@ def fake_db(monkeypatch):
     )
 
     state = {
-        "subscribers": [],                       # tomorrow's eligible
-        "past_dates": [],                        # returned by get_past_release_dates_with_data
-        "past_eligible": {},                     # date -> list of subscriber rows
-        "wines": {},                             # date -> ranked list
+        "subscribers": [],  # tomorrow's eligible
+        "past_dates": [],  # returned by get_past_release_dates_with_data
+        "past_eligible": {},  # date -> list of subscriber rows
+        "wines": {},  # date -> ranked list
         "is_upcoming_tomorrow": True,
-        "already_notified": set(),               # set of (date, chat_id)
-        "release_seen": set(),                   # set of dates
-        "wine_count": {},                        # date -> int
+        "already_notified": set(),  # set of (date, chat_id)
+        "release_seen": set(),  # set of dates
+        "wine_count": {},  # date -> int
     }
 
     def has_notified_subscriber(conn, d, chat_id):
@@ -46,23 +47,28 @@ def fake_db(monkeypatch):
         state["release_seen"].add(d)
         calls.marked_seen.append((d, n))
 
-    monkeypatch.setattr(release.db, "is_upcoming_release_date",
-                        lambda c, d: state["is_upcoming_tomorrow"])
+    monkeypatch.setattr(
+        release.db, "is_upcoming_release_date", lambda c, d: state["is_upcoming_tomorrow"]
+    )
     monkeypatch.setattr(release.db, "get_subscribers", lambda c: state["subscribers"])
-    monkeypatch.setattr(release.db, "get_subscribers_to_notify_for",
-                        lambda c, d: state["past_eligible"].get(d, []))
-    monkeypatch.setattr(release.db, "get_past_release_dates_with_data",
-                        lambda c, since: state["past_dates"])
+    monkeypatch.setattr(
+        release.db, "get_subscribers_to_notify_for", lambda c, d: state["past_eligible"].get(d, [])
+    )
+    monkeypatch.setattr(
+        release.db, "get_past_release_dates_with_data", lambda c, since: state["past_dates"]
+    )
     monkeypatch.setattr(release.db, "has_notified_subscriber", has_notified_subscriber)
     monkeypatch.setattr(release.db, "mark_notified_subscriber", mark_notified_subscriber)
     monkeypatch.setattr(release.db, "is_release_seen", is_release_seen)
     monkeypatch.setattr(release.db, "mark_release_seen", mark_release_seen)
-    monkeypatch.setattr(release.db, "get_wines",
-                        lambda c, d: [None] * state["wine_count"].get(d, 0))
+    monkeypatch.setattr(
+        release.db, "get_wines", lambda c, d: [None] * state["wine_count"].get(d, 0)
+    )
 
     sent_messages = []
-    monkeypatch.setattr(release, "send_message",
-                        lambda chat_id, msg: sent_messages.append((chat_id, msg)))
+    monkeypatch.setattr(
+        release, "send_message", lambda chat_id, msg: sent_messages.append((chat_id, msg))
+    )
     calls.sent = sent_messages
 
     # Pretend ranking always returns one wine for any date the test marks "has data".
@@ -70,10 +76,10 @@ def fake_db(monkeypatch):
         if state["wines"].get(d):
             return state["wines"][d]
         return []
+
     monkeypatch.setattr(release.ranking, "build_ranked_view", fake_build)
 
-    monkeypatch.setattr(release, "format_message",
-                        lambda wines, d, **kw: f"msg for {d}")
+    monkeypatch.setattr(release, "format_message", lambda wines, d, **kw: f"msg for {d}")
 
     return state, calls
 

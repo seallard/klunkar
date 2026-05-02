@@ -97,9 +97,7 @@ def _parse_product(p: dict) -> SBProduct:
     # `productNumberShort` is the bare artikelnummer (e.g. "91176") that appears
     # on receipts, in the SB app, and on Munskänkarna's pages. `productNumber`
     # ("9117601") embeds a 2-digit pack-size suffix and is only useful for URLs.
-    artikelnummer = str(
-        p.get("productNumberShort") or p.get("productNumber") or p["productId"]
-    )
+    artikelnummer = str(p.get("productNumberShort") or p.get("productNumber") or p["productId"])
     return SBProduct(
         product_id=p["productId"],
         product_number=artikelnummer,

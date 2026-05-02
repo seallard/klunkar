@@ -20,7 +20,9 @@ def test_release_url():
 
 def test_parse_known_wine():
     html = FIXTURE.read_text(encoding="utf-8")
-    parsed = _parse(html, "https://www.munskankarna.se/sv/vinlocus/tillfalligt-sortiment-24-april-2026")
+    parsed = _parse(
+        html, "https://www.munskankarna.se/sv/vinlocus/tillfalligt-sortiment-24-april-2026"
+    )
 
     assert "94806" in parsed
     p = parsed["94806"]
@@ -34,7 +36,9 @@ def test_parse_known_wine():
 
 def test_parse_extracts_full_release():
     html = FIXTURE.read_text(encoding="utf-8")
-    parsed = _parse(html, "https://www.munskankarna.se/sv/vinlocus/tillfalligt-sortiment-24-april-2026")
+    parsed = _parse(
+        html, "https://www.munskankarna.se/sv/vinlocus/tillfalligt-sortiment-24-april-2026"
+    )
 
     assert len(parsed) >= 30
     assert all(0 <= p.score <= 20 for p in parsed.values())

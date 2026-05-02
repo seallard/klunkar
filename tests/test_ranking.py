@@ -9,20 +9,29 @@ RD = date(2026, 4, 24)
 
 def _wine(num, name, price=200.0, wine_type="Rött vin"):
     return Wine(
-        sb_product_number=num, sb_product_id=num, release_date=RD,
-        name=name, producer="X", sb_url=f"https://sb/{num}",
-        price=price, wine_type=wine_type,
+        sb_product_number=num,
+        sb_product_id=num,
+        release_date=RD,
+        name=name,
+        producer="X",
+        sb_url=f"https://sb/{num}",
+        price=price,
+        wine_type=wine_type,
     )
 
 
 def _vivino(avg, count, name="match"):
-    return {"wine_id": 1, "matched_name": name, "ratings_average": avg,
-            "ratings_count": count, "wine_url": "https://v/1"}
+    return {
+        "wine_id": 1,
+        "matched_name": name,
+        "ratings_average": avg,
+        "ratings_count": count,
+        "wine_url": "https://v/1",
+    }
 
 
 def _munskankarna(score, value=None):
-    return {"score": score, "value_rating": value,
-            "tasting_note": "n", "review_url": "https://m/1"}
+    return {"score": score, "value_rating": value, "tasting_note": "n", "review_url": "https://m/1"}
 
 
 def _conn_with(rows):
@@ -82,10 +91,13 @@ def test_vivino_bayesian_favors_more_ratings(monkeypatch):
 
 def test_payloads_round_trip_to_models(monkeypatch):
     rows = [
-        (_wine("1", "A"), {
-            "vivino": _vivino(4.0, 50),
-            "munskankarna": _munskankarna(14.0, "prisvärt"),
-        }),
+        (
+            _wine("1", "A"),
+            {
+                "vivino": _vivino(4.0, 50),
+                "munskankarna": _munskankarna(14.0, "prisvärt"),
+            },
+        ),
     ]
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(MagicMock(), RD, source="vivino")
