@@ -358,25 +358,86 @@ def _handle_category_callback(
     log.info("/category callback toggle %s from %d → %s", canonical, chat_id, new)
 
 
+_WINE_TYPE_TOKENS: dict[str, str] = {
+    "rod": "Rött vin",
+    "vit": "Vitt vin",
+    "rose": "Rosévin",
+    "mou": "Mousserande vin",
+}
+_WINE_TYPE_TOKEN_FROM_CANONICAL = {v: k for k, v in _WINE_TYPE_TOKENS.items()}
+
+
+def _winetype_picker_text(active: list[str]) -> str:
+    if active:
+        body = f"Aktiv: {_escape(', '.join(active))}"
+    else:
+        body = _escape("Aktiv: ingen (alla vintyper)")
+    return f"*Välj vintyp*\n{body}"
+
+
+def _winetype_keyboard(active: list[str]) -> dict:
+    active_set = set(active)
+    rows: list[list[dict]] = []
+    pair: list[dict] = []
+    for canonical in _WINE_TYPE_CANONICAL:
+        token = _WINE_TYPE_TOKEN_FROM_CANONICAL[canonical]
+        prefix = "✅" if canonical in active_set else "◯"
+        pair.append({"text": f"{prefix} {canonical}", "callback_data": f"wt:{token}"})
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([{"text": "Klar — visa lista", "callback_data": "wt:done"}])
+    return {"inline_keyboard": rows}
+
+
+def _handle_winetype_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    if payload == "done":
+        active = db.get_subscriber_wine_type_filter(conn, chat_id) or []
+        if active:
+            final = f"Vintyp satt till: {_escape(', '.join(active))}"
+        else:
+            final = _escape("Vintypfilter borttaget — alla vintyper visas.")
+        edit_message_text(chat_id, message_id, final)
+
+        target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+        if target:
+            source = db.get_subscriber_rank_source(conn, chat_id)
+            if not _send_ranked(chat_id, conn, target, source):
+                send_message(chat_id, _escape(_empty_view_message(target)))
+        log.info("/winetype callback done from %d → %s", chat_id, active or "[cleared]")
+        return
+
+    canonical = _WINE_TYPE_TOKENS.get(payload)
+    if canonical is None:
+        log.warning("Unknown winetype callback token: %r", payload)
+        return
+
+    current = db.get_subscriber_wine_type_filter(conn, chat_id) or []
+    if canonical in current:
+        new = [c for c in current if c != canonical]
+    else:
+        new = current + [canonical]
+    db.set_subscriber_wine_type_filter(conn, chat_id, new or None)
+
+    edit_message_text(
+        chat_id, message_id, _winetype_picker_text(new), reply_markup=_winetype_keyboard(new)
+    )
+    log.info("/winetype callback toggle %s from %d → %s", canonical, chat_id, new)
+
+
 def _handle_winetype(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split(maxsplit=1)
     arg = parts[1] if len(parts) >= 2 else ""
 
     if not arg.strip():
         current = db.get_subscriber_wine_type_filter(conn, chat_id) or []
-        lines = ["*Vintyper*", ""]
-        if current:
-            lines.append(f"Aktiv: {_escape(', '.join(current))}")
-        else:
-            lines.append(_escape("Aktiv: ingen (alla vintyper)"))
-        lines.append("")
-        lines.append("*Tillgängliga:*")
-        for v in _WINE_TYPE_CANONICAL:
-            lines.append(f"• {_escape(v)}")
-        lines.append("")
-        lines.append(_escape("Sätt med t.ex. /winetype rött  eller  /winetype rött,vitt"))
-        lines.append(_escape("Rensa alla filter med /clear"))
-        send_message(chat_id, "\n".join(lines))
+        send_message(
+            chat_id, _winetype_picker_text(current), reply_markup=_winetype_keyboard(current)
+        )
         return
 
     resolved, unknown = parse_wine_type_args(arg)
@@ -631,6 +692,8 @@ def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
             _handle_source_callback(chat_id, message_id, payload, conn)
         elif prefix == "cat":
             _handle_category_callback(chat_id, message_id, payload, conn)
+        elif prefix == "wt":
+            _handle_winetype_callback(chat_id, message_id, payload, conn)
         else:
             log.warning("Unknown callback prefix: %r", prefix)
     finally:

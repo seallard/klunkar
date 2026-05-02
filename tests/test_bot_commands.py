@@ -326,6 +326,45 @@ def test_category_callback_done_sends_list(fake_state, monkeypatch):
     assert "fynd" in state.edits[-1][2]
 
 
+def test_winetype_callback_toggle_adds_value(fake_state):
+    state, sent = fake_state
+    state.wine_type_filter = None
+
+    bot._handle_winetype_callback(123, 50, "rod", MagicMock())
+
+    assert state.wine_type_filter == ["Rött vin"]
+    assert state.edits[-1][1] == 50
+    assert "Rött vin" in state.edits[-1][2]
+
+
+def test_winetype_callback_toggle_removes_existing(fake_state):
+    state, sent = fake_state
+    state.wine_type_filter = ["Rött vin", "Vitt vin"]
+
+    bot._handle_winetype_callback(123, 50, "rod", MagicMock())
+
+    assert state.wine_type_filter == ["Vitt vin"]
+
+
+def test_winetype_callback_done_sends_list(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.wine_type_filter = ["Rött vin"]
+    called = {}
+
+    def fake_send_ranked(chat_id, conn, release_date, source):
+        called["args"] = (chat_id, release_date, source)
+        return True
+
+    monkeypatch.setattr(bot, "_send_ranked", fake_send_ranked)
+    monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
+
+    bot._handle_winetype_callback(123, 50, "done", MagicMock())
+
+    assert called["args"][0] == 123
+    assert state.edits[-1][1] == 50
+    assert "Rött vin" in state.edits[-1][2]
+
+
 def test_callback_unknown_prefix_is_no_op(fake_state):
     state, sent = fake_state
     query = {
@@ -364,7 +403,7 @@ def test_winetype_no_arg_shows_current(fake_state):
     bot._handle_winetype(123, "/winetype", MagicMock())
 
     msg = sent[-1][1]
-    assert "Vintyper" in msg
+    assert "Välj vintyp" in msg
     assert "Rött vin" in msg
 
 
