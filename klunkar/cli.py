@@ -139,7 +139,7 @@ def refetch(
 @app.command("preview")
 def preview(
     release_date: Annotated[str | None, typer.Argument()] = None,
-    source: Annotated[str, typer.Option("--source")] = "vivino",
+    source: Annotated[str, typer.Option("--source")] = "munskankarna",
     category: Annotated[
         str | None, typer.Option("--category", help='Comma-separated; e.g. "fynd,prisvärt"')
     ] = None,

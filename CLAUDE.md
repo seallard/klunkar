@@ -1,7 +1,7 @@
 # klunkar
 
 ## Project Summary
-Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcoming *tillfälliga sortiment* release. Each subscriber picks which source ranks their list — currently Vivino (default) or Munskänkarna — sent the day before each release (and again when a late-publishing source like Munskänkarna lands).
+Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcoming *tillfälliga sortiment* release. Each subscriber picks which source ranks their list — currently Munskänkarna (default) or Vivino — sent the day before each release (and again when a late-publishing source like Munskänkarna lands).
 
 One Python package, one CLI (`klunkar`), **two processes** running from the same codebase:
 

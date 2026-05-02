@@ -18,7 +18,7 @@ def fake_state(monkeypatch):
     sent: list[tuple[int, str]] = []
     state = SimpleNamespace(
         budget=None,
-        rank_source="vivino",
+        rank_source="munskankarna",
         value_filter=None,
         upcoming=[],
     )
@@ -111,19 +111,19 @@ def test_clear_resets_budget_and_category(fake_state, monkeypatch):
     msg = sent[0][1]
     assert "Filter rensade" in msg
     assert "budget" in msg and "kategori" in msg
-    assert "Källa kvar" in msg and "Vivino" in msg
+    assert "Källa kvar" in msg and "Munskänkarna" in msg
 
 
 def test_clear_preserves_source(fake_state, monkeypatch):
     state, sent = fake_state
     state.budget = 200.0
-    state.rank_source = "munskankarna"
+    state.rank_source = "vivino"
     monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
 
     bot._handle_clear(123, MagicMock())
 
-    assert state.rank_source == "munskankarna"   # source untouched
-    assert any("Munskänkarna" in msg for _, msg in sent)
+    assert state.rank_source == "vivino"   # source untouched
+    assert any("Vivino" in msg for _, msg in sent)
 
 
 def test_clear_noop_when_no_filters(fake_state):
@@ -159,12 +159,12 @@ def test_settings_reports_all_fields(fake_state):
 
 def test_settings_handles_unset_state(fake_state):
     state, sent = fake_state
-    # all defaults: budget=None, rank_source="vivino", value_filter=None, no upcoming
+    # all defaults: budget=None, rank_source="munskankarna", value_filter=None, no upcoming
 
     bot._handle_settings(456, MagicMock())
 
     msg = sent[-1][1]
-    assert "Vivino" in msg
+    assert "Munskänkarna" in msg
     assert "Budget:" in msg and "ingen" in msg
     assert "Kategori:" in msg and "alla" in msg
     assert "Nästa släpp:" in msg and "okänt" in msg
@@ -205,7 +205,7 @@ def test_recent_sends_ranked_for_last_release(fake_state, monkeypatch):
 
     bot._handle_recent(789, MagicMock())
 
-    assert called["args"] == (789, last, "vivino")
+    assert called["args"] == (789, last, "munskankarna")
     # _send_ranked succeeded → no fallback empty-view message
     assert not any("matchar dina filter" in msg for _, msg in sent)
 

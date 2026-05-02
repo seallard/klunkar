@@ -30,7 +30,10 @@ def migrate(conn: psycopg.Connection) -> None:
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS max_price FLOAT")
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS last_preview_date DATE")
         cur.execute(
-            "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS rank_source TEXT NOT NULL DEFAULT 'vivino'"
+            "ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS rank_source TEXT NOT NULL DEFAULT 'munskankarna'"
+        )
+        cur.execute(
+            "ALTER TABLE subscribers ALTER COLUMN rank_source SET DEFAULT 'munskankarna'"
         )
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS value_filter TEXT[]")
         cur.execute("""
@@ -113,6 +116,30 @@ def migrate(conn: psycopg.Connection) -> None:
                 fetched_at   TIMESTAMPTZ NOT NULL DEFAULT now()
             )
         """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS applied_migrations (
+                name       TEXT PRIMARY KEY,
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        # One-shot data migrations. Each guarded by applied_migrations so a
+        # later explicit user choice (e.g. /source vivino) is not undone on
+        # subsequent migrate() runs.
+        _apply_once(
+            cur,
+            "2026_05_02_default_source_to_munskankarna",
+            "UPDATE subscribers SET rank_source = 'munskankarna' WHERE rank_source = 'vivino'",
+        )
+
+
+def _apply_once(cur: psycopg.Cursor, name: str, sql: str) -> None:
+    cur.execute(
+        "INSERT INTO applied_migrations (name) VALUES (%s) ON CONFLICT DO NOTHING RETURNING name",
+        (name,),
+    )
+    if cur.fetchone():
+        cur.execute(sql)
 
 
 # ---- APIM key (unchanged) -----------------------------------------------
@@ -445,7 +472,7 @@ def get_subscriber_rank_source(conn: psycopg.Connection, chat_id: int) -> Source
     with conn.cursor() as cur:
         cur.execute("SELECT rank_source FROM subscribers WHERE chat_id = %s", (chat_id,))
         row = cur.fetchone()
-        return Source(row[0]) if row else Source.VIVINO
+        return Source(row[0]) if row else Source.MUNSKANKARNA
 
 
 def set_subscriber_rank_source(
