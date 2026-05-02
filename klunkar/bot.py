@@ -315,15 +315,28 @@ def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
 
 
 def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
-    dates = db.get_upcoming_release_dates(conn, date.today())
-    if not dates:
-        send_message(chat_id, "Inga kommande släpp hittades\\.")
-    else:
-        lines = ["*Kommande släpp*", ""]
-        for d in dates:
+    upcoming = db.get_upcoming_release_dates(conn, date.today())
+    past = list(reversed(db.get_past_release_dates_with_data(conn, since=date.min)))
+
+    if not upcoming and not past:
+        send_message(chat_id, "Inga släpp hittades\\.")
+        log.info("/releases from %d (empty)", chat_id)
+        return
+
+    lines: list[str] = []
+    if upcoming:
+        lines.append("*Kommande släpp*")
+        for d in upcoming:
             lines.append(f"• {_escape(_sv_date(d))}")
-        send_message(chat_id, "\n".join(lines))
-    log.info("/releases from %d", chat_id)
+    if past:
+        if lines:
+            lines.append("")
+        lines.append("*Tidigare släpp* \\(använd `/old YYYY\\-MM\\-DD`\\)")
+        for d in past:
+            lines.append(f"• {_escape(_sv_date(d))}")
+
+    send_message(chat_id, "\n".join(lines))
+    log.info("/releases from %d (upcoming=%d, past=%d)", chat_id, len(upcoming), len(past))
 
 
 def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:

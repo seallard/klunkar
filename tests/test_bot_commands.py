@@ -22,6 +22,7 @@ def fake_state(monkeypatch):
         rank_source="munskankarna",
         value_filter=None,
         upcoming=[],
+        past=[],
     )
 
     monkeypatch.setattr(bot, "send_message", lambda chat_id, msg: sent.append((chat_id, msg)))
@@ -29,6 +30,7 @@ def fake_state(monkeypatch):
     monkeypatch.setattr(bot.db, "get_subscriber_rank_source", lambda c, chat: state.rank_source)
     monkeypatch.setattr(bot.db, "get_subscriber_value_filter", lambda c, chat: state.value_filter)
     monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
+    monkeypatch.setattr(bot.db, "get_past_release_dates_with_data", lambda c, since: state.past)
     monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: None)
     monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
     monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: None)
@@ -223,6 +225,36 @@ def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
 
     assert any("matchar dina filter" in msg for _, msg in sent)
     assert any("24 april 2026" in msg for _, msg in sent)
+
+
+# ---- /releases ----------------------------------------------------------
+
+
+def test_releases_shows_past_and_upcoming(fake_state):
+    state, sent = fake_state
+    state.past = [date(2026, 4, 10), date(2026, 4, 17), date(2026, 4, 24)]
+    state.upcoming = [date(2026, 5, 8)]
+
+    bot._handle_releases(789, MagicMock())
+
+    msg = sent[-1][1]
+    assert "Kommande släpp" in msg and "8 maj 2026" in msg
+    assert "Tidigare släpp" in msg
+    # past listed in reverse chronological (most recent first)
+    i_24 = msg.index("24 april 2026")
+    i_17 = msg.index("17 april 2026")
+    i_10 = msg.index("10 april 2026")
+    assert i_24 < i_17 < i_10
+
+
+def test_releases_empty_when_neither(fake_state):
+    state, sent = fake_state
+    state.past = []
+    state.upcoming = []
+
+    bot._handle_releases(789, MagicMock())
+
+    assert any("Inga släpp" in m for _, m in sent)
 
 
 # ---- handler dispatch ---------------------------------------------------
