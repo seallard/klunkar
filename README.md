@@ -33,8 +33,9 @@ A `/recent` reply by default — and the same list once a budget and Munskänkar
 | `/releases` | Upcoming release dates (next 90 days) |
 | `/source` | Choose ranking source (Munskänkarna or Vivino) |
 | `/budget 150` | Only show wines under 150 kr |
+| `/winetype rött,vitt` | Filter on wine type (*rött*, *vitt*, *rosé*, *mousserande*) |
 | `/category fynd` | Filter on Munskänkarna value category (e.g. *fynd*, *prisvärt*) |
-| `/clear` | Reset budget and category filters (source preserved) |
+| `/clear` | Reset all filters (source preserved) |
 | `/settings` | Show your current settings |
 | `/help` | Show the command list |
 

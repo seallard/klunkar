@@ -57,3 +57,4 @@ class Subscriber(BaseModel):
     max_price: float | None = None
     rank_source: Source = Source.MUNSKANKARNA
     value_filter: list[str] | None = None
+    wine_type_filter: list[str] | None = None

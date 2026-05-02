@@ -292,6 +292,7 @@ def format_message(
     source: Source | str,
     max_price: float | None = None,
     value_ratings: set[str] | None = None,
+    wine_types: set[str] | None = None,
 ) -> str:
     source = Source(source)
     if max_price:
@@ -303,6 +304,9 @@ def format_message(
     sub_lines = [_escape(f"Rankas av {_source_label(source)}")]
     if max_price:
         sub_lines.append(_escape(f"Budget: {int(max_price)} kr"))
+    if wine_types:
+        types = ", ".join(sorted(wine_types))
+        sub_lines.append(_escape(f"Vintyp: {types}"))
     if value_ratings:
         cats = ", ".join(sorted(value_ratings))
         sub_lines.append(_escape(f"Kategori: {cats}"))

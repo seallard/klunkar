@@ -38,6 +38,40 @@ _VALUE_ALIASES = {
 
 def parse_category_args(arg: str) -> tuple[list[str], list[str]]:
     """Returns (resolved, unknown). Empty arg returns ([], [])."""
+    return _parse_aliased(arg, _VALUE_ALIASES)
+
+
+# Wine type filter — values match Systembolaget's `categoryLevel2` exactly so
+# the DB filter is direct equality. Aliases let the user type "rött" / "red".
+_WINE_TYPE_CANONICAL = ["Rött vin", "Vitt vin", "Rosévin", "Mousserande vin"]
+_WINE_TYPE_ALIASES = {
+    "rött": "Rött vin",
+    "rött vin": "Rött vin",
+    "rod": "Rött vin",
+    "rött-vin": "Rött vin",
+    "red": "Rött vin",
+    "vitt": "Vitt vin",
+    "vitt vin": "Vitt vin",
+    "vitt-vin": "Vitt vin",
+    "white": "Vitt vin",
+    "rosé": "Rosévin",
+    "rose": "Rosévin",
+    "rosévin": "Rosévin",
+    "rosevin": "Rosévin",
+    "mousserande": "Mousserande vin",
+    "mousserande vin": "Mousserande vin",
+    "mousserande-vin": "Mousserande vin",
+    "bubbel": "Mousserande vin",
+    "sparkling": "Mousserande vin",
+}
+
+
+def parse_wine_type_args(arg: str) -> tuple[list[str], list[str]]:
+    """Returns (resolved, unknown). Empty arg returns ([], [])."""
+    return _parse_aliased(arg, _WINE_TYPE_ALIASES)
+
+
+def _parse_aliased(arg: str, aliases: dict[str, str]) -> tuple[list[str], list[str]]:
     raw = arg.strip().lower()
     if not raw:
         return [], []
@@ -45,7 +79,7 @@ def parse_category_args(arg: str) -> tuple[list[str], list[str]]:
     resolved: list[str] = []
     unknown: list[str] = []
     for tok in tokens:
-        canon = _VALUE_ALIASES.get(tok)
+        canon = aliases.get(tok)
         if canon is None:
             unknown.append(tok)
         elif canon not in resolved:
@@ -72,11 +106,14 @@ def _send_ranked(
 ) -> bool:
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     value_set = set(value_filter) if value_filter else None
+    type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
+    type_set = set(type_filter) if type_filter else None
     ranked = ranking.build_ranked_view(
         conn,
         release_date,
         source=source,
         value_ratings=value_set,
+        wine_types=type_set,
     )
     if not ranked:
         return False
@@ -89,6 +126,7 @@ def _send_ranked(
             source=source,
             max_price=max_price,
             value_ratings=value_set,
+            wine_types=type_set,
         ),
     )
     return True
@@ -235,9 +273,59 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     log.info("/category from %d → %s", chat_id, resolved or "[cleared]")
 
 
+def _handle_winetype(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split(maxsplit=1)
+    arg = parts[1] if len(parts) >= 2 else ""
+
+    if not arg.strip():
+        current = db.get_subscriber_wine_type_filter(conn, chat_id) or []
+        lines = ["*Vintyper*", ""]
+        if current:
+            lines.append(f"Aktiv: {_escape(', '.join(current))}")
+        else:
+            lines.append(_escape("Aktiv: ingen (alla vintyper)"))
+        lines.append("")
+        lines.append("*Tillgängliga:*")
+        for v in _WINE_TYPE_CANONICAL:
+            lines.append(f"• {_escape(v)}")
+        lines.append("")
+        lines.append(_escape("Sätt med t.ex. /winetype rött  eller  /winetype rött,vitt"))
+        lines.append(_escape("Rensa alla filter med /clear"))
+        send_message(chat_id, "\n".join(lines))
+        return
+
+    resolved, unknown = parse_wine_type_args(arg)
+    if unknown:
+        send_message(
+            chat_id,
+            _escape(
+                f"Okänd vintyp: {', '.join(unknown)}. Giltiga: {', '.join(_WINE_TYPE_CANONICAL)}."
+            ),
+        )
+        return
+
+    if not resolved:
+        send_message(chat_id, _escape("Ange minst en vintyp, t.ex. /winetype rött."))
+        return
+
+    db.set_subscriber_wine_type_filter(conn, chat_id, resolved)
+    send_message(
+        chat_id,
+        _escape(f"Vintypfilter satt till: {', '.join(resolved)}."),
+    )
+
+    target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+    if target:
+        source = db.get_subscriber_rank_source(conn, chat_id)
+        if not _send_ranked(chat_id, conn, target, source):
+            send_message(chat_id, _escape(_empty_view_message(target)))
+    log.info("/winetype from %d → %s", chat_id, resolved or "[cleared]")
+
+
 def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
+    wine_type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
     source = db.get_subscriber_rank_source(conn, chat_id)
 
     cleared: list[str] = []
@@ -247,6 +335,9 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     if value_filter:
         db.set_subscriber_value_filter(conn, chat_id, None)
         cleared.append("kategori")
+    if wine_type_filter:
+        db.set_subscriber_wine_type_filter(conn, chat_id, None)
+        cleared.append("vintyp")
 
     if not cleared:
         send_message(chat_id, _escape("Inga filter att rensa."))
@@ -344,6 +435,7 @@ def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
     source = db.get_subscriber_rank_source(conn, chat_id)
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
+    wine_type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
 
     next_release: date | None = None
     upcoming = db.get_upcoming_release_dates(conn, date.today())
@@ -352,6 +444,7 @@ def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
 
     budget_text = f"{int(budget)} kr" if budget is not None else "ingen"
     category_text = ", ".join(value_filter) if value_filter else "alla"
+    type_text = ", ".join(wine_type_filter) if wine_type_filter else "alla"
     next_text = _sv_date(next_release) if next_release else "okänt"
 
     lines = [
@@ -359,6 +452,7 @@ def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
         "",
         f"*Källa:* {_escape(_source_label(source))}",
         f"*Budget:* {_escape(budget_text)}",
+        f"*Vintyp:* {_escape(type_text)}",
         f"*Kategori:* {_escape(category_text)}",
         "",
         f"*Nästa släpp:* {_escape(next_text)}",
@@ -384,9 +478,11 @@ def _handle_help(chat_id: int) -> None:
         "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
         "/budget — visa nuvarande budget\n"
         "/budget 150 — sätt budget till 150 kr\n"
+        "/winetype — visa nuvarande vintypsfilter\n"
+        "/winetype rött,vitt — filtrera på vintyp \\(rött, vitt, rosé, mousserande\\)\n"
         "/category — visa nuvarande kategorifilter\n"
         "/category fynd — filtrera på Munskänkarnas kategori \\(t\\.ex\\. *fynd*, *mer än prisvärt*\\)\n"
-        "/clear — rensa budget och kategori \\(källa behålls\\)\n\n"
+        "/clear — rensa alla filter \\(källa behålls\\)\n\n"
         "*Information*\n"
         "/settings — visa dina inställningar\n"
         "/help — denna hjälp",
@@ -405,6 +501,7 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/budget": _handle_budget,
     "/source": _handle_source,
     "/category": _handle_category,
+    "/winetype": _handle_winetype,
     "/clear": lambda c, t, conn: _handle_clear(c, conn),
     "/next": lambda c, t, conn: _handle_next(c, conn),
     "/old": _handle_old,

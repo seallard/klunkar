@@ -21,6 +21,7 @@ def fake_state(monkeypatch):
         budget=None,
         rank_source="munskankarna",
         value_filter=None,
+        wine_type_filter=None,
         upcoming=[],
         past=[],
     )
@@ -29,6 +30,9 @@ def fake_state(monkeypatch):
     monkeypatch.setattr(bot.db, "get_subscriber_budget", lambda c, chat: state.budget)
     monkeypatch.setattr(bot.db, "get_subscriber_rank_source", lambda c, chat: state.rank_source)
     monkeypatch.setattr(bot.db, "get_subscriber_value_filter", lambda c, chat: state.value_filter)
+    monkeypatch.setattr(
+        bot.db, "get_subscriber_wine_type_filter", lambda c, chat: state.wine_type_filter
+    )
     monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
     monkeypatch.setattr(bot.db, "get_past_release_dates_with_data", lambda c, since: state.past)
     monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: None)
@@ -44,6 +48,11 @@ def fake_state(monkeypatch):
         state.value_filter = value
 
     monkeypatch.setattr(bot.db, "set_subscriber_value_filter", _set_value_filter)
+
+    def _set_wine_type_filter(conn, chat, value):
+        state.wine_type_filter = value
+
+    monkeypatch.setattr(bot.db, "set_subscriber_wine_type_filter", _set_wine_type_filter)
 
     return state, sent
 
@@ -225,6 +234,75 @@ def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
 
     assert any("matchar dina filter" in msg for _, msg in sent)
     assert any("24 april 2026" in msg for _, msg in sent)
+
+
+# ---- /winetype ----------------------------------------------------------
+
+
+def test_winetype_parse_aliases():
+    from klunkar.bot import parse_wine_type_args
+
+    resolved, unknown = parse_wine_type_args("rött, white, mousserande")
+    assert resolved == ["Rött vin", "Vitt vin", "Mousserande vin"]
+    assert unknown == []
+
+
+def test_winetype_parse_unknown_collected():
+    from klunkar.bot import parse_wine_type_args
+
+    resolved, unknown = parse_wine_type_args("rött, blå, vitt")
+    assert resolved == ["Rött vin", "Vitt vin"]
+    assert unknown == ["blå"]
+
+
+def test_winetype_no_arg_shows_current(fake_state):
+    state, sent = fake_state
+    state.wine_type_filter = ["Rött vin"]
+
+    bot._handle_winetype(123, "/winetype", MagicMock())
+
+    msg = sent[-1][1]
+    assert "Vintyper" in msg
+    assert "Rött vin" in msg
+
+
+def test_winetype_set(fake_state):
+    state, sent = fake_state
+
+    bot._handle_winetype(123, "/winetype rött,vitt", MagicMock())
+
+    assert state.wine_type_filter == ["Rött vin", "Vitt vin"]
+    assert any("Vintypfilter satt till" in m for _, m in sent)
+
+
+def test_winetype_unknown_rejected(fake_state):
+    state, sent = fake_state
+
+    bot._handle_winetype(123, "/winetype blå", MagicMock())
+
+    assert state.wine_type_filter is None  # unchanged
+    assert any("Okänd vintyp" in m for _, m in sent)
+
+
+def test_clear_resets_wine_type_filter(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.wine_type_filter = ["Rött vin"]
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
+
+    bot._handle_clear(123, MagicMock())
+
+    assert state.wine_type_filter is None
+    assert any("vintyp" in m for _, m in sent)
+
+
+def test_settings_shows_wine_type(fake_state):
+    state, sent = fake_state
+    state.wine_type_filter = ["Rött vin", "Vitt vin"]
+
+    bot._handle_settings(456, MagicMock())
+
+    msg = sent[-1][1]
+    assert "Vintyp:" in msg and "Rött vin, Vitt vin" in msg
 
 
 # ---- /old ---------------------------------------------------------------

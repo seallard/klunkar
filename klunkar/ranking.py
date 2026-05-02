@@ -64,6 +64,7 @@ def build_ranked_view(
     *,
     source: Source | str,
     value_ratings: set[str] | None = None,
+    wine_types: set[str] | None = None,
 ) -> list[RankedWine]:
     source = Source(source)  # accept string at the boundary (CLI, DB)
     rows = db.get_wines_with_enrichments(conn, release_date)
@@ -72,6 +73,8 @@ def build_ranked_view(
     scored: list[tuple[float, tuple[Any, ...], RankedWine]] = []
     for wine, payloads in rows:
         if source not in payloads:
+            continue
+        if wine_types and (wine.wine_type or "") not in wine_types:
             continue
         if value_ratings:
             mp = payloads.get(Source.MUNSKANKARNA, {})

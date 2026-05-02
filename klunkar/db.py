@@ -34,6 +34,7 @@ def migrate(conn: psycopg.Connection) -> None:
         )
         cur.execute("ALTER TABLE subscribers ALTER COLUMN rank_source SET DEFAULT 'munskankarna'")
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS value_filter TEXT[]")
+        cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS wine_type_filter TEXT[]")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS seen_releases (
                 release_date DATE PRIMARY KEY,
@@ -437,12 +438,16 @@ def _row_to_subscriber(row: tuple) -> Subscriber:
         max_price=row[1],
         rank_source=row[2],
         value_filter=row[3],
+        wine_type_filter=row[4],
     )
+
+
+_SUB_COLS = "chat_id, max_price, rank_source, value_filter, wine_type_filter"
 
 
 def get_subscribers(conn: psycopg.Connection) -> list[Subscriber]:
     with conn.cursor() as cur:
-        cur.execute("SELECT chat_id, max_price, rank_source, value_filter FROM subscribers")
+        cur.execute(f"SELECT {_SUB_COLS} FROM subscribers")
         return [_row_to_subscriber(r) for r in cur.fetchall()]
 
 
@@ -454,8 +459,8 @@ def get_subscribers_to_notify_for(conn: psycopg.Connection, release_date: date) 
     """
     with conn.cursor() as cur:
         cur.execute(
-            """
-            SELECT s.chat_id, s.max_price, s.rank_source, s.value_filter
+            f"""
+            SELECT {_SUB_COLS}
             FROM subscribers s
             WHERE s.created_at < %s
               AND NOT EXISTS (
@@ -515,6 +520,24 @@ def set_subscriber_value_filter(
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET value_filter = %s WHERE chat_id = %s",
+            (stored, chat_id),
+        )
+
+
+def get_subscriber_wine_type_filter(conn: psycopg.Connection, chat_id: int) -> list[str] | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT wine_type_filter FROM subscribers WHERE chat_id = %s", (chat_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_subscriber_wine_type_filter(
+    conn: psycopg.Connection, chat_id: int, values: list[str] | None
+) -> None:
+    stored = values if values else None
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            "UPDATE subscribers SET wine_type_filter = %s WHERE chat_id = %s",
             (stored, chat_id),
         )
 

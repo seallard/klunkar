@@ -103,3 +103,26 @@ def test_payloads_round_trip_to_models(monkeypatch):
     out = ranking.build_ranked_view(MagicMock(), RD, source="vivino")
     assert out[0].vivino is not None and out[0].vivino.ratings_count == 50
     assert out[0].munskankarna is not None and out[0].munskankarna.value_rating == "prisvärt"
+
+
+def test_wine_types_filter_drops_other_types(monkeypatch):
+    rows = [
+        (_wine("1", "Red", wine_type="Rött vin"), {"vivino": _vivino(4.5, 100)}),
+        (_wine("2", "White", wine_type="Vitt vin"), {"vivino": _vivino(4.3, 100)}),
+        (_wine("3", "Sparkling", wine_type="Mousserande vin"), {"vivino": _vivino(4.4, 100)}),
+    ]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(
+        MagicMock(), RD, source="vivino", wine_types={"Rött vin", "Vitt vin"}
+    )
+    assert {r.wine.sb_product_number for r in out} == {"1", "2"}
+
+
+def test_wine_types_none_means_no_filter(monkeypatch):
+    rows = [
+        (_wine("1", "Red", wine_type="Rött vin"), {"vivino": _vivino(4.5, 100)}),
+        (_wine("2", "White", wine_type="Vitt vin"), {"vivino": _vivino(4.3, 100)}),
+    ]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(MagicMock(), RD, source="vivino", wine_types=None)
+    assert len(out) == 2

@@ -5,7 +5,7 @@ Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcomi
 
 One Python package, one CLI (`klunkar`), **two processes** running from the same codebase:
 
-- **`klunkar bot`** — long-running Telegram **long polling** (not webhooks). Handles `/start`, `/stop`, `/budget`, `/source`, `/category`, `/clear`, `/next`, `/recent`, `/old`, `/releases`, `/settings`, `/help`.
+- **`klunkar bot`** — long-running Telegram **long polling** (not webhooks). Handles `/start`, `/stop`, `/budget`, `/source`, `/category`, `/winetype`, `/clear`, `/next`, `/recent`, `/old`, `/releases`, `/settings`, `/help`.
 - **`klunkar check-release`** — one-shot, run daily by cron. Prefetches all SB wines for upcoming releases, runs every enricher, fans out to subscribers (per-`(release_date, chat_id)` dedup), then **back-fills enrichment + retroactive notifications for recent past releases** within `BACKFILL_WINDOW_DAYS` (default 14). This catches Munskänkarna-ranked subscribers who were skipped pre-release because Munskänkarna's review page hadn't published yet — once it lands, the next cron tick enriches the past release and sends the message.
 
 All commands read exclusively from the DB. Only `check-release` and `enrich` make external HTTP requests.
@@ -47,6 +47,7 @@ Schema is recreated by `klunkar migrate` (idempotent). Key tables:
 - `notified_subscribers (release_date, chat_id)` — per-(date, chat) send dedup; allows a Munskänkarna subscriber to be notified later when the source publishes
 - `subscribers.rank_source` — which source's ranking the user wants
 - `subscribers.value_filter TEXT[]` — Munskänkarna value-rating filter (e.g. `{fynd}`); NULL = all categories
+- `subscribers.wine_type_filter TEXT[]` — wine-type filter using SB's `categoryLevel2` strings (e.g. `{Rött vin, Vitt vin}`); NULL = all types
 - `subscribers.created_at` — used by `get_subscribers_to_notify_for` to gate retroactive sends to subscribers who were active at the original notification window (recent joiners get the welcome message instead)
 
 ## Tech stack
