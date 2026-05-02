@@ -264,10 +264,11 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
 
 def _send_for_date(chat_id: int, target: date, conn: psycopg.Connection) -> None:
     if not db.has_wines_for(conn, target):
-        send_message(
-            chat_id,
-            f"Inga viner finns ännu för {_escape(_sv_date(target))}\\. Försök igen senare\\.",
-        )
+        if target < date.today():
+            msg = f"Inget släpp för {_sv_date(target)}. Se /releases för tillgängliga datum."
+        else:
+            msg = f"Inga viner finns ännu för {_sv_date(target)}. Försök igen senare."
+        send_message(chat_id, _escape(msg))
         return
 
     db.set_subscriber_preview_date(conn, chat_id, target)

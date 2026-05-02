@@ -227,6 +227,46 @@ def test_recent_empty_view_when_filters_exclude_all(fake_state, monkeypatch):
     assert any("24 april 2026" in msg for _, msg in sent)
 
 
+# ---- /old ---------------------------------------------------------------
+
+
+def test_old_past_date_with_no_wines_says_no_release(fake_state, monkeypatch):
+    _, sent = fake_state
+    monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
+
+    bot._handle_old(123, "/old 2020-01-15", MagicMock())
+
+    msg = sent[-1][1]
+    assert "Inget släpp" in msg
+    assert "15 januari 2020" in msg
+    assert "/releases" in msg
+    assert "ännu" not in msg  # different wording from upcoming-but-not-yet-fetched
+
+
+def test_old_future_date_with_no_wines_says_not_yet(fake_state, monkeypatch):
+    _, sent = fake_state
+    monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
+    future = (date.today().replace(year=date.today().year + 1)).isoformat()
+
+    bot._handle_old(123, f"/old {future}", MagicMock())
+
+    msg = sent[-1][1]
+    assert "ännu" in msg
+    assert "Försök igen senare" in msg
+
+
+def test_old_invalid_date(fake_state):
+    _, sent = fake_state
+    bot._handle_old(123, "/old not-a-date", MagicMock())
+    assert any("Ogiltigt datum" in m for _, m in sent)
+
+
+def test_old_missing_date(fake_state):
+    _, sent = fake_state
+    bot._handle_old(123, "/old", MagicMock())
+    assert any("Ange ett datum" in m for _, m in sent)
+
+
 # ---- /releases ----------------------------------------------------------
 
 
