@@ -35,13 +35,12 @@ _VALUE_ALIASES = {
     "ej prisvärt": "ej prisvärt",
     "ej-prisvart": "ej prisvärt",
 }
-_CLEAR_TOKENS = {"clear", "off", "none", "-", "rensa", "ta-bort"}
 
 
 def parse_category_args(arg: str) -> tuple[list[str], list[str]]:
-    """Returns (resolved, unknown). Empty resolved + empty unknown = clear."""
+    """Returns (resolved, unknown). Empty arg returns ([], [])."""
     raw = arg.strip().lower()
-    if not raw or raw in _CLEAR_TOKENS:
+    if not raw:
         return [], []
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     resolved: list[str] = []
@@ -126,22 +125,18 @@ def _handle_budget(chat_id: int, text: str, conn: psycopg.Connection) -> None:
             status = f"Aktuell budget: {int(current)} kr."
         send_message(
             chat_id,
-            _escape(f"{status}\nSätt med /budget 150. Rensa med /budget clear."),
+            _escape(f"{status}\nSätt med /budget 150. Rensa alla filter med /clear."),
         )
         return
 
     arg = parts[1].strip().lower()
-    if arg in _CLEAR_TOKENS:
-        db.set_subscriber_budget(conn, chat_id, None)
-        send_message(chat_id, _escape("Budget borttagen — du får alla tio bästa vinerna."))
-    else:
-        try:
-            max_price = float(arg)
-        except ValueError:
-            send_message(chat_id, _escape("Ange ett giltigt belopp, t.ex. /budget 150."))
-            return
-        db.set_subscriber_budget(conn, chat_id, max_price)
-        send_message(chat_id, _escape(f"Budget satt till {int(max_price)} kr."))
+    try:
+        max_price = float(arg)
+    except ValueError:
+        send_message(chat_id, _escape("Ange ett giltigt belopp, t.ex. /budget 150."))
+        return
+    db.set_subscriber_budget(conn, chat_id, max_price)
+    send_message(chat_id, _escape(f"Budget satt till {int(max_price)} kr."))
 
     target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
     if target:
@@ -203,7 +198,7 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
             lines.append(f"• {_escape(v)}")
         lines.append("")
         lines.append(_escape("Sätt med t.ex. /category fynd  eller  /category fynd,prisvärt"))
-        lines.append(_escape("Rensa med /category clear"))
+        lines.append(_escape("Rensa alla filter med /clear"))
         send_message(chat_id, "\n".join(lines))
         return
 
@@ -219,14 +214,14 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         return
 
     if not resolved:
-        db.set_subscriber_value_filter(conn, chat_id, None)
-        send_message(chat_id, _escape("Kategorifilter borttaget — du får alla kategorier."))
-    else:
-        db.set_subscriber_value_filter(conn, chat_id, resolved)
-        send_message(
-            chat_id,
-            _escape(f"Kategorifilter satt till: {', '.join(resolved)}."),
-        )
+        send_message(chat_id, _escape("Ange minst en kategori, t.ex. /category fynd."))
+        return
+
+    db.set_subscriber_value_filter(conn, chat_id, resolved)
+    send_message(
+        chat_id,
+        _escape(f"Kategorifilter satt till: {', '.join(resolved)}."),
+    )
 
     target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
     if target:
@@ -234,6 +229,36 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         if not _send_ranked(chat_id, conn, target, source):
             send_message(chat_id, _escape(_empty_view_message(target)))
     log.info("/category from %d → %s", chat_id, resolved or "[cleared]")
+
+
+def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
+    budget = db.get_subscriber_budget(conn, chat_id)
+    value_filter = db.get_subscriber_value_filter(conn, chat_id)
+    source = db.get_subscriber_rank_source(conn, chat_id)
+
+    cleared: list[str] = []
+    if budget is not None:
+        db.set_subscriber_budget(conn, chat_id, None)
+        cleared.append("budget")
+    if value_filter:
+        db.set_subscriber_value_filter(conn, chat_id, None)
+        cleared.append("kategori")
+
+    if not cleared:
+        send_message(chat_id, _escape("Inga filter att rensa."))
+    else:
+        send_message(
+            chat_id,
+            _escape(
+                f"Filter rensade: {', '.join(cleared)}.\n"
+                f"Källa kvar: {_source_label(source)}."
+            ),
+        )
+
+        target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+        if target and not _send_ranked(chat_id, conn, target, source):
+            send_message(chat_id, _escape(_empty_view_message(target)))
+    log.info("/clear from %d → %s", chat_id, cleared or "[noop]")
 
 
 def _handle_preview(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -333,10 +358,9 @@ def _handle_help(chat_id: int) -> None:
         "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
         "/budget — visa nuvarande budget\n"
         "/budget 150 — sätt budget till 150 kr\n"
-        "/budget clear — ta bort budgetfilter\n"
         "/category — visa nuvarande kategorifilter\n"
         "/category fynd — filtrera på Munskänkarnas kategori \\(t\\.ex\\. *fynd*, *mer än prisvärt*\\)\n"
-        "/category clear — ta bort kategorifilter\n\n"
+        "/clear — rensa budget och kategori \\(källa behålls\\)\n\n"
         "*Information*\n"
         "/settings — visa dina inställningar\n"
         "/help — denna hjälp",
@@ -355,6 +379,7 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/budget":   _handle_budget,
     "/source":   _handle_source,
     "/category": _handle_category,
+    "/clear":    lambda c, t, conn: _handle_clear(c, conn),
     "/preview":  _handle_preview,
     "/recent":   lambda c, t, conn: _handle_recent(c, conn),
     "/releases": lambda c, t, conn: _handle_releases(c, conn),

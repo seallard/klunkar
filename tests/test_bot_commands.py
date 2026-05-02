@@ -41,6 +41,10 @@ def fake_state(monkeypatch):
         state.budget = value
     monkeypatch.setattr(bot.db, "set_subscriber_budget", _set_budget)
 
+    def _set_value_filter(conn, chat, value):
+        state.value_filter = value
+    monkeypatch.setattr(bot.db, "set_subscriber_value_filter", _set_value_filter)
+
     return state, sent
 
 
@@ -54,7 +58,7 @@ def test_budget_no_arg_shows_current_does_not_clear(fake_state):
 
     assert state.budget == 200.0   # not cleared
     assert any("Aktuell budget: 200 kr" in msg for _, msg in sent)
-    assert any("/budget clear" in msg for _, msg in sent)
+    assert any("/clear" in msg for _, msg in sent)
 
 
 def test_budget_no_arg_when_unset_says_so(fake_state):
@@ -66,22 +70,15 @@ def test_budget_no_arg_when_unset_says_so(fake_state):
     assert any("Ingen budget satt" in msg for _, msg in sent)
 
 
-def test_budget_clear_token_removes_filter(fake_state):
+def test_budget_clear_word_is_invalid_amount(fake_state):
+    """`/budget clear` no longer clears — that's `/clear` now."""
     state, sent = fake_state
     state.budget = 200.0
 
     bot._handle_budget(123, "/budget clear", MagicMock())
 
-    assert state.budget is None
-    assert any("Budget borttagen" in msg for _, msg in sent)
-
-
-@pytest.mark.parametrize("token", ["clear", "off", "none", "-", "rensa"])
-def test_budget_clear_aliases(fake_state, token):
-    state, _ = fake_state
-    state.budget = 200.0
-    bot._handle_budget(123, f"/budget {token}", MagicMock())
-    assert state.budget is None
+    assert state.budget == 200.0   # unchanged
+    assert any("giltigt belopp" in msg for _, msg in sent)
 
 
 def test_budget_set_value(fake_state):
@@ -97,6 +94,49 @@ def test_budget_invalid_value(fake_state):
     bot._handle_budget(123, "/budget abc", MagicMock())
     assert state.budget == 200.0   # unchanged
     assert any("giltigt belopp" in msg for _, msg in sent)
+
+
+# ---- /clear -------------------------------------------------------------
+
+def test_clear_resets_budget_and_category(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.budget = 200.0
+    state.value_filter = ["fynd"]
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
+
+    bot._handle_clear(123, MagicMock())
+
+    assert state.budget is None
+    assert state.value_filter is None
+    msg = sent[0][1]
+    assert "Filter rensade" in msg
+    assert "budget" in msg and "kategori" in msg
+    assert "Källa kvar" in msg and "Vivino" in msg
+
+
+def test_clear_preserves_source(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.budget = 200.0
+    state.rank_source = "munskankarna"
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
+
+    bot._handle_clear(123, MagicMock())
+
+    assert state.rank_source == "munskankarna"   # source untouched
+    assert any("Munskänkarna" in msg for _, msg in sent)
+
+
+def test_clear_noop_when_no_filters(fake_state):
+    state, sent = fake_state
+    # defaults: budget=None, value_filter=None
+
+    bot._handle_clear(123, MagicMock())
+
+    assert any("Inga filter att rensa" in msg for _, msg in sent)
+
+
+def test_clear_command_is_dispatched():
+    assert "/clear" in bot._HANDLERS
 
 
 # ---- /settings ----------------------------------------------------------

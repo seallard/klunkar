@@ -35,9 +35,16 @@ def test_parse_aliases_and_dedupe():
     assert unknown == []
 
 
-def test_parse_clear_tokens():
-    for tok in ("clear", "off", "none", "-", "rensa", ""):
-        assert parse_category_args(tok) == ([], [])
+def test_parse_empty_returns_empty():
+    assert parse_category_args("") == ([], [])
+    assert parse_category_args("   ") == ([], [])
+
+
+def test_parse_clear_word_is_unknown():
+    """`clear` no longer special-cased; it lands in unknown like any other token."""
+    resolved, unknown = parse_category_args("clear")
+    assert resolved == []
+    assert unknown == ["clear"]
 
 
 def test_parse_unknown_collected():
