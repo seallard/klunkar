@@ -829,18 +829,16 @@ def _handle_help(chat_id: int) -> None:
         "/next — viner för nästa släpp\n"
         "/recent — viner från senaste släpp\n"
         "/old 2026\\-04\\-24 — viner från ett tidigare släpp\n"
-        "/releases — kommande släpp\n\n"
-        "*Filtrera*\n"
+        "/releases — alla släpp som finns tillgängliga\n\n"
+        "*Inställningar*\n"
+        "/settings — översikt och knappar för att ändra alla filter\n\n"
+        "*Snabbkommandon för filter*\n"
         "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
-        "/budget — visa nuvarande budget\n"
         "/budget 150 — sätt budget till 150 kr\n"
-        "/winetype — visa nuvarande vintypsfilter\n"
         "/winetype rött,vitt — filtrera på vintyp \\(rött, vitt, rosé, mousserande\\)\n"
-        "/category — visa nuvarande kategorifilter\n"
         "/category fynd — filtrera på Munskänkarnas kategori \\(t\\.ex\\. *fynd*, *mer än prisvärt*\\)\n"
         "/clear — rensa alla filter \\(källa behålls\\)\n\n"
-        "*Information*\n"
-        "/settings — visa dina inställningar\n"
+        "*Övrigt*\n"
         "/help — denna hjälp",
     )
     log.info("/help from %d", chat_id)
