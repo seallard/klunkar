@@ -867,26 +867,16 @@ def _handle_settings(chat_id: int, conn: psycopg.Connection) -> None:
 def _handle_help(chat_id: int) -> None:
     send_message(
         chat_id,
-        "🍷 *Klunkar* hjälper dig hitta de bästa vinerna från Systembolagets "
-        "tillfälliga sortiment\\.\n\n"
-        "*Prenumeration*\n"
-        "/start — prenumerera\n"
-        "/stop — avsluta\n\n"
-        "*Visa listor*\n"
-        "/next — viner för nästa släpp\n"
-        "/recent — viner från senaste släpp\n"
-        "/old 2026\\-04\\-24 — viner från ett tidigare släpp\n"
-        "/releases — alla släpp som finns tillgängliga\n\n"
-        "*Inställningar*\n"
-        "/settings — översikt och knappar för att ändra alla filter\n\n"
-        "*Snabbkommandon för filter*\n"
-        "/source — välj rankningskälla \\(Vivino eller Munskänkarna\\)\n"
-        "/budget 150 — sätt budget till 150 kr\n"
-        "/winetype rött,vitt — filtrera på vintyp \\(rött, vitt, rosé, mousserande\\)\n"
-        "/category fynd — filtrera på Munskänkarnas kategori \\(t\\.ex\\. *fynd*, *mer än prisvärt*\\)\n"
-        "/clear — rensa alla filter \\(källa behålls\\)\n\n"
-        "*Övrigt*\n"
-        "/help — denna hjälp",
+        "🍷 *Klunkar* — bästa vinerna från Systembolagets tillfälliga sortiment\\.\n\n"
+        "*Listor*\n"
+        "/next — nästa släpp\n"
+        "/recent — senaste släpp\n"
+        "/old — välj tidigare släpp\n"
+        "/releases — alla tillgängliga släpp\n\n"
+        "*Filter*\n"
+        "/settings — knappar för alla filter\n"
+        "/source · /budget 150 · /winetype rött · /category fynd · /clear\n\n"
+        "/start · /stop · /help",
     )
     log.info("/help from %d", chat_id)
 
