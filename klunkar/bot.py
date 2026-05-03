@@ -1074,18 +1074,18 @@ def _hub_keyboard() -> dict:
     return {
         "inline_keyboard": [
             [
-                {"text": "Ändra släpp", "callback_data": "hub:rel"},
+                {"text": "Välj släpp", "callback_data": "hub:rel"},
             ],
             [
-                {"text": "Ändra recensent", "callback_data": "hub:src"},
-                {"text": "Ändra vintyp", "callback_data": "hub:wt"},
+                {"text": "Välj recensent", "callback_data": "hub:src"},
+                {"text": "Välj vintyp", "callback_data": "hub:wt"},
             ],
             [
-                {"text": "Ändra prisvärdhet", "callback_data": "hub:val"},
-                {"text": "Ändra budget", "callback_data": "hub:bud"},
+                {"text": "Välj prisvärdhet", "callback_data": "hub:val"},
+                {"text": "Välj budget", "callback_data": "hub:bud"},
             ],
             [
-                {"text": "Ändra land", "callback_data": "hub:cnt"},
+                {"text": "Välj land", "callback_data": "hub:cnt"},
             ],
             [
                 {"text": "🧹 Rensa alla filter", "callback_data": "hub:clear"},
