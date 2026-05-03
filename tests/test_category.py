@@ -150,7 +150,7 @@ def test_format_message_shows_active_filter():
         source="munskankarna",
         value_ratings={"fynd", "prisvärt"},
     )
-    assert "Kategori: fynd, prisvärt" in out
+    assert "Prisvärdhet: fynd, prisvärt" in out
 
 
 def test_format_message_omits_filter_when_none():
@@ -160,4 +160,4 @@ def test_format_message_omits_filter_when_none():
         munskankarna=MunskankarnaPayload(score=15, value_rating="fynd", review_url="https://m/1"),
     )
     out = format_message([rw], RD, source="munskankarna")
-    assert "Kategori" not in out
+    assert "Prisvärdhet" not in out

@@ -272,8 +272,8 @@ def _category_picker_text(active: list[str]) -> str:
     if active:
         body = f"Aktiv: {_escape(', '.join(active))}"
     else:
-        body = _escape("Aktiv: ingen (alla kategorier)")
-    return f"*Välj kategori*\n{body}"
+        body = _escape("Aktiv: ingen (alla nivåer)")
+    return f"*Välj prisvärdhet*\n{body}"
 
 
 def _category_keyboard(
@@ -317,19 +317,19 @@ def _handle_category(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         send_message(
             chat_id,
             _escape(
-                f"Okänd kategori: {', '.join(unknown)}. Giltiga: {', '.join(_VALUE_CANONICAL)}."
+                f"Okänd prisvärdhet: {', '.join(unknown)}. Giltiga: {', '.join(_VALUE_CANONICAL)}."
             ),
         )
         return
 
     if not resolved:
-        send_message(chat_id, _escape("Ange minst en kategori, t.ex. /category fynd."))
+        send_message(chat_id, _escape("Ange minst en prisvärdhet, t.ex. /category fynd."))
         return
 
     db.set_subscriber_value_filter(conn, chat_id, resolved)
     send_message(
         chat_id,
-        _escape(f"Kategorifilter satt till: {', '.join(resolved)}."),
+        _escape(f"Prisvärdhetsfilter satt till: {', '.join(resolved)}."),
     )
 
     target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
@@ -346,9 +346,9 @@ def _handle_category_callback(
     if payload == "done":
         active = db.get_subscriber_value_filter(conn, chat_id) or []
         if active:
-            final = f"Kategori satt till: {_escape(', '.join(active))}"
+            final = f"Prisvärdhet satt till: {_escape(', '.join(active))}"
         else:
-            final = _escape("Kategorifilter borttaget — alla kategorier visas.")
+            final = _escape("Prisvärdhetsfilter borttaget — alla nivåer visas.")
         edit_message_text(chat_id, message_id, final)
 
         target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
@@ -841,7 +841,7 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
         cleared.append("budget")
     if value_filter:
         db.set_subscriber_value_filter(conn, chat_id, None)
-        cleared.append("kategori")
+        cleared.append("prisvärdhet")
     if wine_type_filter:
         db.set_subscriber_wine_type_filter(conn, chat_id, None)
         cleared.append("vintyp")
@@ -994,7 +994,7 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
             f"*Budget:* {_escape(budget_text)}",
             f"*Vintyp:* {_escape(type_text)}",
             f"*Land:* {_escape(country_text)}",
-            f"*Kategori:* {_escape(category_text)}",
+            f"*Prisvärdhet:* {_escape(category_text)}",
             "",
             f"*Nästa släpp:* {_escape(next_text)}",
         ]
@@ -1009,7 +1009,7 @@ def _hub_keyboard() -> dict:
                 {"text": "Ändra vintyp", "callback_data": "hub:wt"},
             ],
             [
-                {"text": "Ändra kategori", "callback_data": "hub:cat"},
+                {"text": "Ändra prisvärdhet", "callback_data": "hub:cat"},
                 {"text": "Ändra budget", "callback_data": "hub:bud"},
             ],
             [

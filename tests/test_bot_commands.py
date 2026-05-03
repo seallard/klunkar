@@ -150,7 +150,7 @@ def test_clear_resets_budget_and_category(fake_state, monkeypatch):
     assert state.value_filter is None
     msg = sent[0][1]
     assert "Filter rensade" in msg
-    assert "budget" in msg and "kategori" in msg
+    assert "budget" in msg and "prisvärdhet" in msg
     assert "Källa kvar" in msg and "Munskänkarna" in msg
 
 
@@ -194,7 +194,7 @@ def test_settings_reports_all_fields(fake_state):
     msg = sent[-1][1]
     assert "Källa:" in msg and "Munskänkarna" in msg
     assert "Budget:" in msg and "200 kr" in msg
-    assert "Kategori:" in msg and "fynd, prisvärt" in msg
+    assert "Prisvärdhet:" in msg and "fynd, prisvärt" in msg
     assert "Nästa släpp:" in msg and "8 maj 2026" in msg
 
 
@@ -207,7 +207,7 @@ def test_settings_handles_unset_state(fake_state):
     msg = sent[-1][1]
     assert "Munskänkarna" in msg
     assert "Budget:" in msg and "ingen" in msg
-    assert "Kategori:" in msg and "alla" in msg
+    assert "Prisvärdhet:" in msg and "alla" in msg
     assert "Nästa släpp:" in msg and "okänt" in msg
 
 
@@ -449,7 +449,7 @@ def test_hub_cat_toggle_keeps_in_picker(fake_state):
 
     bot._handle_hub_callback(123, 99, "cat:fynd", MagicMock())
     assert state.value_filter is None  # toggled off
-    assert "Välj kategori" in state.edits[-1][2]
+    assert "Välj prisvärdhet" in state.edits[-1][2]
 
 
 def test_hub_clear_resets_all_filters(fake_state):

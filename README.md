@@ -35,7 +35,7 @@ A `/recent` reply by default — and the same list once a budget and Munskänkar
 | `/budget 150` | Only show wines under 150 kr |
 | `/winetype rött,vitt` | Filter on wine type (*rött*, *vitt*, *rosé*, *mousserande*) |
 | `/country Italien,Frankrike` | Filter on country (only countries present in the active release) |
-| `/category fynd` | Filter on Munskänkarna value category (e.g. *fynd*, *prisvärt*) |
+| `/category fynd` | Filter on Munskänkarna prisvärdhet (e.g. *fynd*, *prisvärt*) |
 | `/clear` | Reset all filters (source preserved) |
 | `/settings` | Show your current settings |
 | `/help` | Show the command list |

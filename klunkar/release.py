@@ -359,7 +359,7 @@ def format_message(
         lines.append(_escape(f"Land: {cs}"))
     if value_ratings:
         cats = ", ".join(sorted(value_ratings))
-        lines.append(_escape(f"Kategori: {cats}"))
+        lines.append(_escape(f"Prisvärdhet: {cats}"))
     lines.append("")
 
     for w in wines:
