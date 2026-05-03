@@ -689,9 +689,11 @@ def test_releases_shows_past_and_upcoming(fake_state, monkeypatch):
     flat_text = [btn["text"] for row in rows for btn in row]
     flat_data = [btn["callback_data"] for row in rows for btn in row]
 
-    # Section labels rendered, dates rendered, past dates reverse-chronological
-    assert "— Kommande —" in flat_text and "— Tidigare —" in flat_text
-    assert "8 maj 2026" in flat_text
+    # Upcoming gets 📅, past gets 🕒. No section-header buttons.
+    assert "📅 8 maj 2026" in flat_text
+    assert "🕒 24 april 2026" in flat_text
+    assert "— Kommande —" not in flat_text and "— Tidigare —" not in flat_text
+    # Upcoming first, then past in reverse-chronological order
     assert flat_data.index("old:2026-05-08") < flat_data.index("old:2026-04-24")
     i_24 = flat_data.index("old:2026-04-24")
     i_17 = flat_data.index("old:2026-04-17")

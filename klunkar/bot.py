@@ -940,14 +940,10 @@ def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
 
 def _releases_keyboard(upcoming: list[date], past: list[date]) -> dict:
     rows: list[list[dict]] = []
-    if upcoming:
-        rows.append([{"text": "— Kommande —", "callback_data": "noop"}])
-        for d in upcoming:
-            rows.append([{"text": _sv_date(d), "callback_data": f"old:{d.isoformat()}"}])
-    if past:
-        rows.append([{"text": "— Tidigare —", "callback_data": "noop"}])
-        for d in past:
-            rows.append([{"text": _sv_date(d), "callback_data": f"old:{d.isoformat()}"}])
+    for d in upcoming:
+        rows.append([{"text": f"📅 {_sv_date(d)}", "callback_data": f"old:{d.isoformat()}"}])
+    for d in past:
+        rows.append([{"text": f"🕒 {_sv_date(d)}", "callback_data": f"old:{d.isoformat()}"}])
     return {"inline_keyboard": rows}
 
 
@@ -960,9 +956,12 @@ def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
         log.info("/releases from %d (empty)", chat_id)
         return
 
+    body_lines = ["*Tillgängliga släpp*"]
+    if upcoming and past:
+        body_lines.append(_escape("📅 kommande · 🕒 tidigare"))
     send_message(
         chat_id,
-        "*Tillgängliga släpp*",
+        "\n".join(body_lines),
         reply_markup=_releases_keyboard(upcoming, past),
     )
     log.info("/releases from %d (upcoming=%d, past=%d)", chat_id, len(upcoming), len(past))
