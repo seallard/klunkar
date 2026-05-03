@@ -118,6 +118,7 @@ def _send_ranked(
     if not ranked:
         return False
     max_price = db.get_subscriber_budget(conn, chat_id)
+    type_counts = db.get_release_type_counts(conn, release_date)
     send_message(
         chat_id,
         format_message(
@@ -127,6 +128,7 @@ def _send_ranked(
             max_price=max_price,
             value_ratings=value_set,
             wine_types=type_set,
+            type_counts=type_counts,
         ),
     )
     return True

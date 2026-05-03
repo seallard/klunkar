@@ -264,6 +264,17 @@ def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
         )
 
 
+def get_release_type_counts(conn: psycopg.Connection, release_date: date) -> dict[str, int]:
+    """Distinct wine_type → count for a release. Missing wine_types are bucketed as 'Annat'."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(wine_type, 'Annat'), COUNT(*) FROM wines "
+            "WHERE release_date = %s GROUP BY 1",
+            (release_date,),
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
+
 def has_wines_for(conn: psycopg.Connection, release_date: date) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM wines WHERE release_date = %s LIMIT 1", (release_date,))

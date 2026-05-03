@@ -178,3 +178,41 @@ def test_format_message_backfill_notice_uses_vivino_label():
     )
     out = format_message([rw], RD, source="vivino", is_backfill=True)
     assert "Vivino finns nu med" in out
+
+
+def test_format_message_renders_type_counts():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=10,
+        munskankarna=MunskankarnaPayload(score=10, review_url="https://m/1"),
+    )
+    counts = {"Rött vin": 30, "Vitt vin": 12, "Mousserande vin": 5}
+    out = format_message([rw], RD, source="munskankarna", type_counts=counts)
+    assert "47 viner" in out
+    assert "30 röda" in out
+    assert "12 vita" in out
+    assert "5 mousserande" in out
+
+
+def test_format_message_lumps_uncommon_types_as_ovrigt():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=10,
+        munskankarna=MunskankarnaPayload(score=10, review_url="https://m/1"),
+    )
+    counts = {"Rött vin": 10, "Starkvin": 2, "Aperitifer": 1}
+    out = format_message([rw], RD, source="munskankarna", type_counts=counts)
+    assert "13 viner" in out
+    assert "10 röda" in out
+    assert "3 övrigt" in out
+
+
+def test_format_message_omits_count_line_when_no_counts():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=10,
+        munskankarna=MunskankarnaPayload(score=10, review_url="https://m/1"),
+    )
+    out = format_message([rw], RD, source="munskankarna")
+    # No "viner" count line at all
+    assert "viner ·" not in out and "0 viner" not in out

@@ -46,6 +46,7 @@ def fake_state(monkeypatch):
     )
     monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
     monkeypatch.setattr(bot.db, "get_past_release_dates_with_data", lambda c, since: state.past)
+    monkeypatch.setattr(bot.db, "get_release_type_counts", lambda c, d: {})
     monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: None)
     monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
     monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: None)

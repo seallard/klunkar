@@ -168,6 +168,7 @@ def _notify_subscribers(
 ) -> int:
     """Send the ranked-view message to each eligible subscriber. Returns send count."""
     sent = 0
+    type_counts = db.get_release_type_counts(conn, release_date)
     for sub in subscribers:
         if db.has_notified_subscriber(conn, release_date, sub.chat_id):
             continue
@@ -199,6 +200,7 @@ def _notify_subscribers(
                     max_price=sub.max_price,
                     value_ratings=value_set,
                     wine_types=type_set,
+                    type_counts=type_counts,
                     is_backfill=is_backfill,
                 ),
             )
@@ -292,6 +294,31 @@ def _source_label(source: Source | str) -> str:
     return enricher.display_name if enricher else str(source)
 
 
+_TYPE_SHORT_LABELS = {
+    "Rött vin": "röda",
+    "Vitt vin": "vita",
+    "Rosévin": "rosé",
+    "Mousserande vin": "mousserande",
+}
+
+
+def _format_type_counts(type_counts: dict[str, int]) -> str:
+    """Render '47 viner · 30 röda · 12 vita · 5 mousserande [· 2 övrigt]'."""
+    total = sum(type_counts.values())
+    parts = [f"{total} viner"]
+    other = 0
+    for canonical in _TYPE_SHORT_LABELS:
+        n = type_counts.get(canonical, 0)
+        if n:
+            parts.append(f"{n} {_TYPE_SHORT_LABELS[canonical]}")
+    for canonical, n in type_counts.items():
+        if canonical not in _TYPE_SHORT_LABELS and n:
+            other += n
+    if other:
+        parts.append(f"{other} övrigt")
+    return " · ".join(parts)
+
+
 def format_message(
     wines: list[RankedWine],
     release_date: date,
@@ -300,6 +327,7 @@ def format_message(
     max_price: float | None = None,
     value_ratings: set[str] | None = None,
     wine_types: set[str] | None = None,
+    type_counts: dict[str, int] | None = None,
     is_backfill: bool = False,
 ) -> str:
     source = Source(source)
@@ -313,6 +341,8 @@ def format_message(
         lines.append(f"📬 *Uppdaterad lista* — {_escape(_source_label(source))} finns nu med.")
         lines.append("")
     lines.append(f"🍷 *Tillfälligt sortiment — {date_str}*")
+    if type_counts:
+        lines.append(_escape(_format_type_counts(type_counts)))
     lines.append(_escape(f"Rankas av {_source_label(source)}"))
     if max_price:
         lines.append(_escape(f"Budget: {int(max_price)} kr"))

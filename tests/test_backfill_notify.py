@@ -64,6 +64,7 @@ def fake_db(monkeypatch):
     monkeypatch.setattr(
         release.db, "get_wines", lambda c, d: [None] * state["wine_count"].get(d, 0)
     )
+    monkeypatch.setattr(release.db, "get_release_type_counts", lambda c, d: {})
 
     sent_messages = []
     monkeypatch.setattr(
