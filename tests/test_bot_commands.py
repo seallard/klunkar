@@ -23,6 +23,7 @@ def fake_state(monkeypatch):
         value_filter=None,
         wine_type_filter=None,
         country_filter=None,
+        preview_date=None,
         upcoming=[],
         past=[],
         countries=[],
@@ -54,7 +55,7 @@ def fake_state(monkeypatch):
     monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
     monkeypatch.setattr(bot.db, "get_past_release_dates_with_data", lambda c, since: state.past)
     monkeypatch.setattr(bot.db, "get_release_type_counts", lambda c, d: {})
-    monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: None)
+    monkeypatch.setattr(bot.db, "get_subscriber_preview_date", lambda c, chat: state.preview_date)
     monkeypatch.setattr(bot.db, "has_wines_for", lambda c, d: False)
     monkeypatch.setattr(bot.db, "get_last_release_with_data", lambda c: None)
 
@@ -82,6 +83,11 @@ def fake_state(monkeypatch):
         state.country_filter = value
 
     monkeypatch.setattr(bot.db, "set_subscriber_country_filter", _set_country_filter)
+
+    def _set_preview_date(conn, chat, value):
+        state.preview_date = value
+
+    monkeypatch.setattr(bot.db, "set_subscriber_preview_date", _set_preview_date)
 
     return state, sent
 
@@ -195,7 +201,7 @@ def test_settings_reports_all_fields(fake_state):
     assert "Recensent:" in msg and "Munskänkarna" in msg
     assert "Budget:" in msg and "200 kr" in msg
     assert "Prisvärdhet:" in msg and "fynd, prisvärt" in msg
-    assert "Nästa släpp:" in msg and "8 maj 2026" in msg
+    assert "Släpp:" in msg and "8 maj 2026" in msg
 
 
 def test_settings_handles_unset_state(fake_state):
@@ -208,7 +214,7 @@ def test_settings_handles_unset_state(fake_state):
     assert "Munskänkarna" in msg
     assert "Budget:" in msg and "ingen" in msg
     assert "Prisvärdhet:" in msg and "alla" in msg
-    assert "Nästa släpp:" in msg and "okänt" in msg
+    assert "Släpp:" in msg and "okänt" in msg
 
 
 # ---- _empty_view_message -----------------------------------------------
@@ -392,6 +398,7 @@ def test_settings_sends_hub_keyboard(fake_state, monkeypatch):
 
     flat = [btn["callback_data"] for row in captured[-1].get("inline_keyboard", []) for btn in row]
     assert "hub:src" in flat and "hub:wt" in flat and "hub:val" in flat and "hub:bud" in flat
+    assert "hub:rel" in flat and "hub:show" in flat
 
 
 def test_hub_open_re_renders_hub(fake_state):
@@ -450,6 +457,86 @@ def test_hub_cat_toggle_keeps_in_picker(fake_state):
     bot._handle_hub_callback(123, 99, "val:fynd", MagicMock())
     assert state.value_filter is None  # toggled off
     assert "Välj prisvärdhet" in state.edits[-1][2]
+
+
+def test_hub_show_uses_selected_release(fake_state, monkeypatch):
+    state, _ = fake_state
+    state.upcoming = [date(2026, 5, 8)]
+    called = {}
+
+    def fake_send_for_date(chat_id, target, conn):
+        called["target"] = target
+
+    monkeypatch.setattr(bot, "_send_for_date", fake_send_for_date)
+
+    bot._handle_hub_callback(123, 99, "show", MagicMock())
+
+    assert called["target"] == date(2026, 5, 8)
+
+
+def test_hub_show_falls_back_to_next_upcoming_when_no_preview(fake_state, monkeypatch):
+    state, _ = fake_state
+    state.preview_date = None
+    state.upcoming = [date(2026, 5, 8)]
+    called = {}
+    monkeypatch.setattr(bot, "_send_for_date", lambda c, t, conn: called.setdefault("target", t))
+
+    bot._handle_hub_callback(123, 99, "show", MagicMock())
+
+    assert called["target"] == date(2026, 5, 8)
+
+
+def test_hub_show_uses_preview_date_when_set(fake_state, monkeypatch):
+    state, _ = fake_state
+    state.preview_date = date(2026, 4, 17)
+    state.upcoming = [date(2026, 5, 8)]
+    called = {}
+    monkeypatch.setattr(bot, "_send_for_date", lambda c, t, conn: called.setdefault("target", t))
+
+    bot._handle_hub_callback(123, 99, "show", MagicMock())
+
+    assert called["target"] == date(2026, 4, 17)
+
+
+def test_hub_show_no_releases_sends_message(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.upcoming = []
+    state.preview_date = None
+    monkeypatch.setattr(bot, "_send_for_date", lambda *a, **kw: None)
+
+    bot._handle_hub_callback(123, 99, "show", MagicMock())
+
+    assert any("Inga släpp" in m for _, m in sent)
+
+
+def test_hub_rel_open_picker(fake_state):
+    state, _ = fake_state
+    state.upcoming = [date(2026, 5, 8)]
+    state.past = [date(2026, 4, 24), date(2026, 4, 17)]
+
+    bot._handle_hub_callback(123, 99, "rel", MagicMock())
+
+    assert "Välj släpp" in state.edits[-1][2]
+
+
+def test_hub_rel_pick_date_sets_preview_and_returns_to_hub(fake_state):
+    state, _ = fake_state
+    state.upcoming = [date(2026, 5, 8)]
+
+    bot._handle_hub_callback(123, 99, "rel:2026-04-17", MagicMock())
+
+    assert state.preview_date == date(2026, 4, 17)
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_rel_no_releases(fake_state):
+    state, _ = fake_state
+    state.upcoming = []
+    state.past = []
+
+    bot._handle_hub_callback(123, 99, "rel", MagicMock())
+
+    assert "Inga släpp" in state.edits[-1][2]
 
 
 def test_hub_clear_resets_all_filters(fake_state):

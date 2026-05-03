@@ -477,6 +477,50 @@ def _handle_hub_callback(
         log.info("hub:clear from %d", chat_id)
         return
 
+    if sub == "show":
+        target = _selected_release(conn, chat_id)
+        if target is None:
+            send_message(chat_id, _escape("Inga släpp finns ännu."))
+            return
+        _send_for_date(chat_id, target, conn)
+        log.info("hub:show %s from %d", target, chat_id)
+        return
+
+    if sub == "rel":
+        if not rest:  # open release picker
+            upcoming = db.get_upcoming_release_dates(conn, date.today())
+            past = list(reversed(db.get_past_release_dates_with_data(conn, since=date.min)))
+            if not upcoming and not past:
+                edit_message_text(
+                    chat_id,
+                    message_id,
+                    _escape("Inga släpp finns ännu."),
+                    reply_markup={
+                        "inline_keyboard": [[{"text": "↩ Tillbaka", "callback_data": "hub:open"}]]
+                    },
+                )
+                return
+            edit_message_text(
+                chat_id,
+                message_id,
+                "*Välj släpp*",
+                reply_markup=_releases_keyboard(
+                    upcoming, past, callback_prefix="hub:rel", back_data="hub:open"
+                ),
+            )
+            return
+        try:
+            target = date.fromisoformat(rest)
+        except ValueError:
+            log.warning("hub:rel bad date: %r", rest)
+            return
+        db.set_subscriber_preview_date(conn, chat_id, target)
+        edit_message_text(
+            chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
+        )
+        log.info("hub:rel %s from %d", target, chat_id)
+        return
+
     if sub == "src":
         if not rest:  # open source picker
             current = db.get_subscriber_rank_source(conn, chat_id)
@@ -938,12 +982,34 @@ def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/recent %s from %d", target, chat_id)
 
 
-def _releases_keyboard(upcoming: list[date], past: list[date]) -> dict:
+def _releases_keyboard(
+    upcoming: list[date],
+    past: list[date],
+    *,
+    callback_prefix: str = "old",
+    back_data: str | None = None,
+) -> dict:
     rows: list[list[dict]] = []
     for d in upcoming:
-        rows.append([{"text": f"📅 {_sv_date(d)}", "callback_data": f"old:{d.isoformat()}"}])
+        rows.append(
+            [
+                {
+                    "text": f"📅 {_sv_date(d)}",
+                    "callback_data": f"{callback_prefix}:{d.isoformat()}",
+                }
+            ]
+        )
     for d in past:
-        rows.append([{"text": f"🕒 {_sv_date(d)}", "callback_data": f"old:{d.isoformat()}"}])
+        rows.append(
+            [
+                {
+                    "text": f"🕒 {_sv_date(d)}",
+                    "callback_data": f"{callback_prefix}:{d.isoformat()}",
+                }
+            ]
+        )
+    if back_data:
+        rows.append([{"text": "↩ Tillbaka", "callback_data": back_data}])
     return {"inline_keyboard": rows}
 
 
@@ -967,35 +1033,39 @@ def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/releases from %d (upcoming=%d, past=%d)", chat_id, len(upcoming), len(past))
 
 
+def _selected_release(conn: psycopg.Connection, chat_id: int) -> date | None:
+    """Hub's selected release: the user's preview_date if set, else next upcoming."""
+    preview = db.get_subscriber_preview_date(conn, chat_id)
+    if preview is not None:
+        return preview
+    upcoming = db.get_upcoming_release_dates(conn, date.today())
+    return upcoming[0] if upcoming else None
+
+
 def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
     source = db.get_subscriber_rank_source(conn, chat_id)
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     wine_type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
     country_filter = db.get_subscriber_country_filter(conn, chat_id)
-
-    next_release: date | None = None
-    upcoming = db.get_upcoming_release_dates(conn, date.today())
-    if upcoming:
-        next_release = upcoming[0]
+    selected = _selected_release(conn, chat_id)
 
     budget_text = f"{int(budget)} kr" if budget is not None else "ingen"
     value_text = ", ".join(value_filter) if value_filter else "alla"
     type_text = ", ".join(wine_type_filter) if wine_type_filter else "alla"
     country_text = ", ".join(country_filter) if country_filter else "alla"
-    next_text = _sv_date(next_release) if next_release else "okänt"
+    release_text = _sv_date(selected) if selected else "okänt"
 
     return "\n".join(
         [
             "🍷 *Dina inställningar*",
             "",
+            f"*Släpp:* {_escape(release_text)}",
             f"*Recensent:* {_escape(_source_label(source))}",
             f"*Budget:* {_escape(budget_text)}",
             f"*Vintyp:* {_escape(type_text)}",
             f"*Land:* {_escape(country_text)}",
             f"*Prisvärdhet:* {_escape(value_text)}",
-            "",
-            f"*Nästa släpp:* {_escape(next_text)}",
         ]
     )
 
@@ -1003,6 +1073,9 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
 def _hub_keyboard() -> dict:
     return {
         "inline_keyboard": [
+            [
+                {"text": "Ändra släpp", "callback_data": "hub:rel"},
+            ],
             [
                 {"text": "Ändra recensent", "callback_data": "hub:src"},
                 {"text": "Ändra vintyp", "callback_data": "hub:wt"},
@@ -1016,6 +1089,9 @@ def _hub_keyboard() -> dict:
             ],
             [
                 {"text": "🧹 Rensa alla filter", "callback_data": "hub:clear"},
+            ],
+            [
+                {"text": "🍷 Visa viner", "callback_data": "hub:show"},
             ],
         ]
     }
