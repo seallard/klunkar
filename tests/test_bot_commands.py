@@ -151,7 +151,7 @@ def test_clear_resets_budget_and_value(fake_state, monkeypatch):
     msg = sent[0][1]
     assert "Filter rensade" in msg
     assert "budget" in msg and "prisvärdhet" in msg
-    assert "Källa kvar" in msg and "Munskänkarna" in msg
+    assert "Recensent kvar" in msg and "Munskänkarna" in msg
 
 
 def test_clear_preserves_source(fake_state, monkeypatch):
@@ -192,7 +192,7 @@ def test_settings_reports_all_fields(fake_state):
     bot._handle_settings(456, MagicMock())
 
     msg = sent[-1][1]
-    assert "Källa:" in msg and "Munskänkarna" in msg
+    assert "Recensent:" in msg and "Munskänkarna" in msg
     assert "Budget:" in msg and "200 kr" in msg
     assert "Prisvärdhet:" in msg and "fynd, prisvärt" in msg
     assert "Nästa släpp:" in msg and "8 maj 2026" in msg
@@ -280,7 +280,7 @@ def test_source_no_arg_sends_keyboard(fake_state, monkeypatch):
 
     bot._handle_source(123, "/source", MagicMock())
 
-    assert any("Välj rankningskälla" in m for _, m in sent)
+    assert any("Välj recensent" in m for _, m in sent)
     keyboard = captured[-1].get("inline_keyboard", [])
     flat = [btn["callback_data"] for row in keyboard for btn in row]
     assert "src:vivino" in flat and "src:munskankarna" in flat
@@ -407,7 +407,7 @@ def test_hub_src_open_then_pick_writes_and_returns(fake_state):
 
     # Open the source picker from the hub
     bot._handle_hub_callback(123, 99, "src", MagicMock())
-    assert "Välj rankningskälla" in state.edits[-1][2]
+    assert "Välj recensent" in state.edits[-1][2]
 
     # Pick a source
     bot._handle_hub_callback(123, 99, "src:vivino", MagicMock())

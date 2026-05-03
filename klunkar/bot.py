@@ -209,7 +209,7 @@ def _source_keyboard(
 
 
 def _source_picker_text(current: Source) -> str:
-    return f"*Välj rankningskälla*\nAktiv: {_escape(_source_label(current))}"
+    return f"*Välj recensent*\nAktiv: {_escape(_source_label(current))}"
 
 
 def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -226,11 +226,11 @@ def _handle_source(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         choice = Source(raw)
     except ValueError:
         valid = ", ".join(s.value for s in Source)
-        send_message(chat_id, _escape(f"Okänd källa '{raw}'. Giltiga: {valid}."))
+        send_message(chat_id, _escape(f"Okänd recensent '{raw}'. Giltiga: {valid}."))
         return
 
     db.set_subscriber_rank_source(conn, chat_id, choice)
-    send_message(chat_id, f"Källa satt till *{_escape(_source_label(choice))}*\\.")
+    send_message(chat_id, f"Recensent satt till *{_escape(_source_label(choice))}*\\.")
 
     if target and not _send_ranked(chat_id, conn, target, choice):
         send_message(chat_id, _escape(_empty_view_message(target)))
@@ -852,7 +852,9 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     else:
         send_message(
             chat_id,
-            _escape(f"Filter rensade: {', '.join(cleared)}.\nKälla kvar: {_source_label(source)}."),
+            _escape(
+                f"Filter rensade: {', '.join(cleared)}.\nRecensent kvar: {_source_label(source)}."
+            ),
         )
 
         target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
@@ -988,7 +990,7 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
         [
             "🍷 *Dina inställningar*",
             "",
-            f"*Källa:* {_escape(_source_label(source))}",
+            f"*Recensent:* {_escape(_source_label(source))}",
             f"*Budget:* {_escape(budget_text)}",
             f"*Vintyp:* {_escape(type_text)}",
             f"*Land:* {_escape(country_text)}",
@@ -1003,7 +1005,7 @@ def _hub_keyboard() -> dict:
     return {
         "inline_keyboard": [
             [
-                {"text": "Ändra källa", "callback_data": "hub:src"},
+                {"text": "Ändra recensent", "callback_data": "hub:src"},
                 {"text": "Ändra vintyp", "callback_data": "hub:wt"},
             ],
             [
