@@ -751,6 +751,19 @@ def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/recent %s from %d", target, chat_id)
 
 
+def _releases_keyboard(upcoming: list[date], past: list[date]) -> dict:
+    rows: list[list[dict]] = []
+    if upcoming:
+        rows.append([{"text": "— Kommande —", "callback_data": "noop"}])
+        for d in upcoming:
+            rows.append([{"text": _sv_date(d), "callback_data": f"old:{d.isoformat()}"}])
+    if past:
+        rows.append([{"text": "— Tidigare —", "callback_data": "noop"}])
+        for d in past:
+            rows.append([{"text": _sv_date(d), "callback_data": f"old:{d.isoformat()}"}])
+    return {"inline_keyboard": rows}
+
+
 def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
     upcoming = db.get_upcoming_release_dates(conn, date.today())
     past = list(reversed(db.get_past_release_dates_with_data(conn, since=date.min)))
@@ -760,19 +773,11 @@ def _handle_releases(chat_id: int, conn: psycopg.Connection) -> None:
         log.info("/releases from %d (empty)", chat_id)
         return
 
-    lines: list[str] = []
-    if upcoming:
-        lines.append("*Kommande släpp*")
-        for d in upcoming:
-            lines.append(f"• {_escape(_sv_date(d))}")
-    if past:
-        if lines:
-            lines.append("")
-        lines.append("*Tidigare släpp* \\(använd `/old YYYY\\-MM\\-DD`\\)")
-        for d in past:
-            lines.append(f"• {_escape(_sv_date(d))}")
-
-    send_message(chat_id, "\n".join(lines))
+    send_message(
+        chat_id,
+        "*Tillgängliga släpp*",
+        reply_markup=_releases_keyboard(upcoming, past),
+    )
     log.info("/releases from %d (upcoming=%d, past=%d)", chat_id, len(upcoming), len(past))
 
 

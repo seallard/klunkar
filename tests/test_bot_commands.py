@@ -657,20 +657,32 @@ def test_old_missing_date_no_past_releases(fake_state):
 # ---- /releases ----------------------------------------------------------
 
 
-def test_releases_shows_past_and_upcoming(fake_state):
+def test_releases_shows_past_and_upcoming(fake_state, monkeypatch):
     state, sent = fake_state
     state.past = [date(2026, 4, 10), date(2026, 4, 17), date(2026, 4, 24)]
     state.upcoming = [date(2026, 5, 8)]
 
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+
     bot._handle_releases(789, MagicMock())
 
-    msg = sent[-1][1]
-    assert "Kommande släpp" in msg and "8 maj 2026" in msg
-    assert "Tidigare släpp" in msg
-    # past listed in reverse chronological (most recent first)
-    i_24 = msg.index("24 april 2026")
-    i_17 = msg.index("17 april 2026")
-    i_10 = msg.index("10 april 2026")
+    rows = captured[-1].get("inline_keyboard", [])
+    flat_text = [btn["text"] for row in rows for btn in row]
+    flat_data = [btn["callback_data"] for row in rows for btn in row]
+
+    # Section labels rendered, dates rendered, past dates reverse-chronological
+    assert "— Kommande —" in flat_text and "— Tidigare —" in flat_text
+    assert "8 maj 2026" in flat_text
+    assert flat_data.index("old:2026-05-08") < flat_data.index("old:2026-04-24")
+    i_24 = flat_data.index("old:2026-04-24")
+    i_17 = flat_data.index("old:2026-04-17")
+    i_10 = flat_data.index("old:2026-04-10")
     assert i_24 < i_17 < i_10
 
 
