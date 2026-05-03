@@ -108,12 +108,15 @@ def _send_ranked(
     value_set = set(value_filter) if value_filter else None
     type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
     type_set = set(type_filter) if type_filter else None
+    country_filter = db.get_subscriber_country_filter(conn, chat_id)
+    country_set = set(country_filter) if country_filter else None
     ranked = ranking.build_ranked_view(
         conn,
         release_date,
         source=source,
         value_ratings=value_set,
         wine_types=type_set,
+        countries=country_set,
     )
     if not ranked:
         return False
@@ -128,6 +131,7 @@ def _send_ranked(
             max_price=max_price,
             value_ratings=value_set,
             wine_types=type_set,
+            countries=country_set,
             type_counts=type_counts,
         ),
     )
@@ -468,6 +472,7 @@ def _handle_hub_callback(
         db.set_subscriber_budget(conn, chat_id, None)
         db.set_subscriber_value_filter(conn, chat_id, None)
         db.set_subscriber_wine_type_filter(conn, chat_id, None)
+        db.set_subscriber_country_filter(conn, chat_id, None)
         edit_message_text(
             chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
         )
@@ -572,6 +577,54 @@ def _handle_hub_callback(
         log.info("hub:cat toggle %s from %d → %s", canonical, chat_id, new)
         return
 
+    if sub == "cnt":
+        available = _resolve_release_countries(conn)
+        if not rest:  # open
+            active = db.get_subscriber_country_filter(conn, chat_id) or []
+            if not available:
+                edit_message_text(
+                    chat_id,
+                    message_id,
+                    _escape("Inga land-data tillgängliga ännu."),
+                    reply_markup={
+                        "inline_keyboard": [[{"text": "↩ Tillbaka", "callback_data": "hub:open"}]]
+                    },
+                )
+                return
+            edit_message_text(
+                chat_id,
+                message_id,
+                _country_picker_text(active),
+                reply_markup=_country_keyboard(
+                    active,
+                    available,
+                    callback_prefix="hub:cnt",
+                    done_label="↩ Klar",
+                    done_callback="hub:open",
+                ),
+            )
+            return
+        if rest not in available:
+            log.warning("hub:cnt unknown country: %r", rest)
+            return
+        current = db.get_subscriber_country_filter(conn, chat_id) or []
+        new = [c for c in current if c != rest] if rest in current else current + [rest]
+        db.set_subscriber_country_filter(conn, chat_id, new or None)
+        edit_message_text(
+            chat_id,
+            message_id,
+            _country_picker_text(new),
+            reply_markup=_country_keyboard(
+                new,
+                available,
+                callback_prefix="hub:cnt",
+                done_label="↩ Klar",
+                done_callback="hub:open",
+            ),
+        )
+        log.info("hub:cnt toggle %s from %d → %s", rest, chat_id, new)
+        return
+
     if sub == "bud":
         if not rest:  # open chips
             current = db.get_subscriber_budget(conn, chat_id)
@@ -606,6 +659,134 @@ def _handle_hub_callback(
         return
 
     log.warning("Unknown hub subcommand: %r", sub)
+
+
+def _country_picker_text(active: list[str]) -> str:
+    if active:
+        body = f"Aktiv: {_escape(', '.join(active))}"
+    else:
+        body = _escape("Aktiv: ingen (alla länder)")
+    return f"*Välj land*\n{body}"
+
+
+def _country_keyboard(
+    active: list[str],
+    available: list[str],
+    *,
+    callback_prefix: str = "cnt",
+    done_label: str = "Klar — visa lista",
+    done_callback: str | None = None,
+) -> dict:
+    active_set = set(active)
+    rows: list[list[dict]] = []
+    pair: list[dict] = []
+    for country in available:
+        prefix = "✅" if country in active_set else "◯"
+        pair.append(
+            {"text": f"{prefix} {country}", "callback_data": f"{callback_prefix}:{country}"}
+        )
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([{"text": done_label, "callback_data": done_callback or f"{callback_prefix}:done"}])
+    return {"inline_keyboard": rows}
+
+
+def _resolve_release_countries(conn: psycopg.Connection) -> list[str]:
+    target = _resolve_active_date(conn)
+    return db.get_release_countries(conn, target) if target else []
+
+
+def _handle_country(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    parts = text.split(maxsplit=1)
+    arg = parts[1] if len(parts) >= 2 else ""
+    available = _resolve_release_countries(conn)
+
+    if not arg.strip():
+        active = db.get_subscriber_country_filter(conn, chat_id) or []
+        if not available:
+            send_message(chat_id, _escape("Inga land-data tillgängliga ännu."))
+            return
+        send_message(
+            chat_id,
+            _country_picker_text(active),
+            reply_markup=_country_keyboard(active, available),
+        )
+        return
+
+    # Text path: case-insensitive match against the active release's countries.
+    by_lower = {c.lower(): c for c in available}
+    tokens = [t.strip() for t in arg.split(",") if t.strip()]
+    resolved: list[str] = []
+    unknown: list[str] = []
+    for tok in tokens:
+        canon = by_lower.get(tok.lower())
+        if canon is None:
+            unknown.append(tok)
+        elif canon not in resolved:
+            resolved.append(canon)
+
+    if unknown:
+        send_message(
+            chat_id,
+            _escape(
+                f"Okänt land: {', '.join(unknown)}. "
+                f"Tillgängliga: {', '.join(available) or '(inga)'}."
+            ),
+        )
+        return
+    if not resolved:
+        send_message(chat_id, _escape("Ange minst ett land, t.ex. /country Italien."))
+        return
+
+    db.set_subscriber_country_filter(conn, chat_id, resolved)
+    send_message(chat_id, _escape(f"Landfilter satt till: {', '.join(resolved)}."))
+
+    target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+    if target:
+        source = db.get_subscriber_rank_source(conn, chat_id)
+        if not _send_ranked(chat_id, conn, target, source):
+            send_message(chat_id, _escape(_empty_view_message(target)))
+    log.info("/country from %d → %s", chat_id, resolved)
+
+
+def _handle_country_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    if payload == "done":
+        active = db.get_subscriber_country_filter(conn, chat_id) or []
+        if active:
+            final = f"Land satt till: {_escape(', '.join(active))}"
+        else:
+            final = _escape("Landfilter borttaget — alla länder visas.")
+        edit_message_text(chat_id, message_id, final)
+
+        target = db.get_subscriber_preview_date(conn, chat_id) or _resolve_active_date(conn)
+        if target:
+            source = db.get_subscriber_rank_source(conn, chat_id)
+            if not _send_ranked(chat_id, conn, target, source):
+                send_message(chat_id, _escape(_empty_view_message(target)))
+        log.info("/country callback done from %d → %s", chat_id, active or "[cleared]")
+        return
+
+    available = _resolve_release_countries(conn)
+    if payload not in available:
+        log.warning("country callback unknown country: %r (available=%r)", payload, available)
+        return
+
+    current = db.get_subscriber_country_filter(conn, chat_id) or []
+    new = [c for c in current if c != payload] if payload in current else current + [payload]
+    db.set_subscriber_country_filter(conn, chat_id, new or None)
+
+    edit_message_text(
+        chat_id,
+        message_id,
+        _country_picker_text(new),
+        reply_markup=_country_keyboard(new, available),
+    )
+    log.info("country callback toggle %s from %d → %s", payload, chat_id, new)
 
 
 def _handle_winetype(chat_id: int, text: str, conn: psycopg.Connection) -> None:
@@ -651,6 +832,7 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     wine_type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
+    country_filter = db.get_subscriber_country_filter(conn, chat_id)
     source = db.get_subscriber_rank_source(conn, chat_id)
 
     cleared: list[str] = []
@@ -663,6 +845,9 @@ def _handle_clear(chat_id: int, conn: psycopg.Connection) -> None:
     if wine_type_filter:
         db.set_subscriber_wine_type_filter(conn, chat_id, None)
         cleared.append("vintyp")
+    if country_filter:
+        db.set_subscriber_country_filter(conn, chat_id, None)
+        cleared.append("land")
 
     if not cleared:
         send_message(chat_id, _escape("Inga filter att rensa."))
@@ -788,6 +973,7 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
     budget = db.get_subscriber_budget(conn, chat_id)
     value_filter = db.get_subscriber_value_filter(conn, chat_id)
     wine_type_filter = db.get_subscriber_wine_type_filter(conn, chat_id)
+    country_filter = db.get_subscriber_country_filter(conn, chat_id)
 
     next_release: date | None = None
     upcoming = db.get_upcoming_release_dates(conn, date.today())
@@ -797,6 +983,7 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
     budget_text = f"{int(budget)} kr" if budget is not None else "ingen"
     category_text = ", ".join(value_filter) if value_filter else "alla"
     type_text = ", ".join(wine_type_filter) if wine_type_filter else "alla"
+    country_text = ", ".join(country_filter) if country_filter else "alla"
     next_text = _sv_date(next_release) if next_release else "okänt"
 
     return "\n".join(
@@ -806,6 +993,7 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
             f"*Källa:* {_escape(_source_label(source))}",
             f"*Budget:* {_escape(budget_text)}",
             f"*Vintyp:* {_escape(type_text)}",
+            f"*Land:* {_escape(country_text)}",
             f"*Kategori:* {_escape(category_text)}",
             "",
             f"*Nästa släpp:* {_escape(next_text)}",
@@ -823,6 +1011,9 @@ def _hub_keyboard() -> dict:
             [
                 {"text": "Ändra kategori", "callback_data": "hub:cat"},
                 {"text": "Ändra budget", "callback_data": "hub:bud"},
+            ],
+            [
+                {"text": "Ändra land", "callback_data": "hub:cnt"},
             ],
             [
                 {"text": "🧹 Rensa alla filter", "callback_data": "hub:clear"},
@@ -882,7 +1073,7 @@ def _handle_help(chat_id: int) -> None:
         "/releases — alla tillgängliga släpp\n\n"
         "*Filter*\n"
         "/settings — knappar för alla filter\n"
-        "/source · /budget 150 · /winetype rött · /category fynd · /clear\n\n"
+        "/source · /budget 150 · /winetype rött · /country Italien · /category fynd · /clear\n\n"
         "/start · /stop · /help",
     )
     log.info("/help from %d", chat_id)
@@ -900,6 +1091,7 @@ _HANDLERS: dict[str, Callable[[int, str, psycopg.Connection], None]] = {
     "/source": _handle_source,
     "/category": _handle_category,
     "/winetype": _handle_winetype,
+    "/country": _handle_country,
     "/clear": lambda c, t, conn: _handle_clear(c, conn),
     "/next": lambda c, t, conn: _handle_next(c, conn),
     "/old": _handle_old,
@@ -968,6 +1160,8 @@ def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
             _handle_category_callback(chat_id, message_id, payload, conn)
         elif prefix == "wt":
             _handle_winetype_callback(chat_id, message_id, payload, conn)
+        elif prefix == "cnt":
+            _handle_country_callback(chat_id, message_id, payload, conn)
         elif prefix == "hub":
             _handle_hub_callback(chat_id, message_id, payload, conn)
         elif prefix == "old":

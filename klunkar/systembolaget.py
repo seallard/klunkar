@@ -32,6 +32,7 @@ class SBProduct(BaseModel):
     product_url: str
     price: float
     wine_type: str
+    country: str = ""
 
 
 def _extract_apim_key_from_js(js: str) -> str | None:
@@ -106,6 +107,7 @@ def _parse_product(p: dict) -> SBProduct:
         product_url=_product_url(p),
         price=p.get("price", 0.0),
         wine_type=p.get("categoryLevel2", ""),
+        country=p.get("country", "") or "",
     )
 
 

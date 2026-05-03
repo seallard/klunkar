@@ -35,6 +35,7 @@ def migrate(conn: psycopg.Connection) -> None:
         cur.execute("ALTER TABLE subscribers ALTER COLUMN rank_source SET DEFAULT 'munskankarna'")
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS value_filter TEXT[]")
         cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS wine_type_filter TEXT[]")
+        cur.execute("ALTER TABLE subscribers ADD COLUMN IF NOT EXISTS country_filter TEXT[]")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS seen_releases (
                 release_date DATE PRIMARY KEY,
@@ -62,6 +63,7 @@ def migrate(conn: psycopg.Connection) -> None:
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS wines_release_idx ON wines (release_date)")
+        cur.execute("ALTER TABLE wines ADD COLUMN IF NOT EXISTS country TEXT")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS wine_enrichments (
@@ -238,15 +240,16 @@ def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
         cur.executemany(
             """
             INSERT INTO wines
-                (release_date, sb_product_number, sb_product_id, name, producer, sb_url, price, wine_type)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (release_date, sb_product_number, sb_product_id, name, producer, sb_url, price, wine_type, country)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (release_date, sb_product_number) DO UPDATE SET
                 sb_product_id = EXCLUDED.sb_product_id,
                 name          = EXCLUDED.name,
                 producer      = EXCLUDED.producer,
                 sb_url        = EXCLUDED.sb_url,
                 price         = EXCLUDED.price,
-                wine_type     = EXCLUDED.wine_type
+                wine_type     = EXCLUDED.wine_type,
+                country       = EXCLUDED.country
             """,
             [
                 (
@@ -258,10 +261,23 @@ def upsert_wines(conn: psycopg.Connection, wines: list[Wine]) -> None:
                     w.sb_url,
                     w.price,
                     w.wine_type,
+                    w.country,
                 )
                 for w in wines
             ],
         )
+
+
+def get_release_countries(conn: psycopg.Connection, release_date: date) -> list[str]:
+    """Distinct non-null countries present in a release, sorted."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT country FROM wines "
+            "WHERE release_date = %s AND country IS NOT NULL AND country <> '' "
+            "ORDER BY country",
+            (release_date,),
+        )
+        return [row[0] for row in cur.fetchall()]
 
 
 def get_release_type_counts(conn: psycopg.Connection, release_date: date) -> dict[str, int]:
@@ -285,7 +301,8 @@ def get_wines(conn: psycopg.Connection, release_date: date) -> list[Wine]:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT release_date, sb_product_number, sb_product_id, name, producer, sb_url, price, wine_type
+            SELECT release_date, sb_product_number, sb_product_id, name, producer, sb_url,
+                   price, wine_type, country
             FROM wines WHERE release_date = %s ORDER BY sb_product_number
             """,
             (release_date,),
@@ -300,6 +317,7 @@ def get_wines(conn: psycopg.Connection, release_date: date) -> list[Wine]:
                 sb_url=r[5],
                 price=r[6],
                 wine_type=r[7],
+                country=r[8],
             )
             for r in cur.fetchall()
         ]
@@ -370,7 +388,7 @@ def get_wines_with_enrichments(
             """
             SELECT
                 w.release_date, w.sb_product_number, w.sb_product_id,
-                w.name, w.producer, w.sb_url, w.price, w.wine_type,
+                w.name, w.producer, w.sb_url, w.price, w.wine_type, w.country,
                 COALESCE(
                     jsonb_object_agg(e.source, e.payload) FILTER (WHERE e.source IS NOT NULL),
                     '{}'::jsonb
@@ -381,7 +399,7 @@ def get_wines_with_enrichments(
                 AND e.sb_product_number = w.sb_product_number
             WHERE w.release_date = %s
             GROUP BY w.release_date, w.sb_product_number, w.sb_product_id,
-                     w.name, w.producer, w.sb_url, w.price, w.wine_type
+                     w.name, w.producer, w.sb_url, w.price, w.wine_type, w.country
             ORDER BY w.sb_product_number
             """,
             (release_date,),
@@ -397,8 +415,9 @@ def get_wines_with_enrichments(
                 sb_url=r[5],
                 price=r[6],
                 wine_type=r[7],
+                country=r[8],
             )
-            payloads = r[8] if isinstance(r[8], dict) else json.loads(r[8])
+            payloads = r[9] if isinstance(r[9], dict) else json.loads(r[9])
             out.append((wine, payloads))
         return out
 
@@ -450,10 +469,11 @@ def _row_to_subscriber(row: tuple) -> Subscriber:
         rank_source=row[2],
         value_filter=row[3],
         wine_type_filter=row[4],
+        country_filter=row[5],
     )
 
 
-_SUB_COLS = "chat_id, max_price, rank_source, value_filter, wine_type_filter"
+_SUB_COLS = "chat_id, max_price, rank_source, value_filter, wine_type_filter, country_filter"
 
 
 def get_subscribers(conn: psycopg.Connection) -> list[Subscriber]:
@@ -549,6 +569,24 @@ def set_subscriber_wine_type_filter(
     with conn.transaction(), conn.cursor() as cur:
         cur.execute(
             "UPDATE subscribers SET wine_type_filter = %s WHERE chat_id = %s",
+            (stored, chat_id),
+        )
+
+
+def get_subscriber_country_filter(conn: psycopg.Connection, chat_id: int) -> list[str] | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT country_filter FROM subscribers WHERE chat_id = %s", (chat_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def set_subscriber_country_filter(
+    conn: psycopg.Connection, chat_id: int, values: list[str] | None
+) -> None:
+    stored = values if values else None
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute(
+            "UPDATE subscribers SET country_filter = %s WHERE chat_id = %s",
             (stored, chat_id),
         )
 

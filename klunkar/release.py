@@ -53,6 +53,7 @@ def _wines_from_products(release_date: date, products: list[systembolaget.SBProd
             sb_url=p.product_url,
             price=p.price or None,
             wine_type=p.wine_type or None,
+            country=p.country or None,
         )
         for p in products
     ]
@@ -174,12 +175,14 @@ def _notify_subscribers(
             continue
         value_set = set(sub.value_filter) if sub.value_filter else None
         type_set = set(sub.wine_type_filter) if sub.wine_type_filter else None
+        country_set = set(sub.country_filter) if sub.country_filter else None
         ranked = ranking.build_ranked_view(
             conn,
             release_date,
             source=sub.rank_source,
             value_ratings=value_set,
             wine_types=type_set,
+            countries=country_set,
         )
         if not ranked:
             log.info(
@@ -200,6 +203,7 @@ def _notify_subscribers(
                     max_price=sub.max_price,
                     value_ratings=value_set,
                     wine_types=type_set,
+                    countries=country_set,
                     type_counts=type_counts,
                     is_backfill=is_backfill,
                 ),
@@ -327,6 +331,7 @@ def format_message(
     max_price: float | None = None,
     value_ratings: set[str] | None = None,
     wine_types: set[str] | None = None,
+    countries: set[str] | None = None,
     type_counts: dict[str, int] | None = None,
     is_backfill: bool = False,
 ) -> str:
@@ -349,6 +354,9 @@ def format_message(
     if wine_types:
         types = ", ".join(sorted(wine_types))
         lines.append(_escape(f"Vintyp: {types}"))
+    if countries:
+        cs = ", ".join(sorted(countries))
+        lines.append(_escape(f"Land: {cs}"))
     if value_ratings:
         cats = ", ".join(sorted(value_ratings))
         lines.append(_escape(f"Kategori: {cats}"))

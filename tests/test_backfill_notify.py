@@ -73,7 +73,7 @@ def fake_db(monkeypatch):
     calls.sent = sent_messages
 
     # Pretend ranking always returns one wine for any date the test marks "has data".
-    def fake_build(conn, d, *, source, value_ratings=None, wine_types=None):
+    def fake_build(conn, d, *, source, value_ratings=None, wine_types=None, countries=None):
         if state["wines"].get(d):
             return state["wines"][d]
         return []
@@ -212,7 +212,7 @@ def test_notify_passes_wine_type_filter_to_build(fake_db, monkeypatch):
 
     captured: list[dict] = []
 
-    def capturing_build(conn, d, *, source, value_ratings=None, wine_types=None):
+    def capturing_build(conn, d, *, source, value_ratings=None, wine_types=None, countries=None):
         captured.append({"wine_types": wine_types})
         return state["wines"].get(d, [])
 

@@ -20,6 +20,7 @@ class Wine(BaseModel):
     sb_url: str
     price: float | None = None
     wine_type: str | None = None
+    country: str | None = None
 
 
 class VivinoPayload(BaseModel):
@@ -58,3 +59,4 @@ class Subscriber(BaseModel):
     rank_source: Source = Source.MUNSKANKARNA
     value_filter: list[str] | None = None
     wine_type_filter: list[str] | None = None
+    country_filter: list[str] | None = None

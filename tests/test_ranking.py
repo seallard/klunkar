@@ -126,3 +126,30 @@ def test_wine_types_none_means_no_filter(monkeypatch):
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(MagicMock(), RD, source="vivino", wine_types=None)
     assert len(out) == 2
+
+
+def _wine_country(num, name, country):
+    return Wine(
+        sb_product_number=num,
+        sb_product_id=num,
+        release_date=RD,
+        name=name,
+        producer="X",
+        sb_url=f"https://sb/{num}",
+        price=200.0,
+        wine_type="Rött vin",
+        country=country,
+    )
+
+
+def test_countries_filter_drops_other_countries(monkeypatch):
+    rows = [
+        (_wine_country("1", "It", "Italien"), {"vivino": _vivino(4.5, 100)}),
+        (_wine_country("2", "Fr", "Frankrike"), {"vivino": _vivino(4.3, 100)}),
+        (_wine_country("3", "Sp", "Spanien"), {"vivino": _vivino(4.4, 100)}),
+    ]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(
+        MagicMock(), RD, source="vivino", countries={"Italien", "Frankrike"}
+    )
+    assert {r.wine.sb_product_number for r in out} == {"1", "2"}

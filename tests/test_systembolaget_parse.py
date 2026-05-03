@@ -45,3 +45,22 @@ def test_extract_apim_key_skips_low_entropy_placeholder():
 def test_extract_apim_key_returns_none_when_only_placeholder():
     js = '"00000000000000000000000000000000" "ffffffffffffffffffffffffffffffff"'
     assert systembolaget._extract_apim_key_from_js(js) is None
+
+
+def test_parse_product_extracts_country():
+    p = {
+        "productId": "p1",
+        "productNumberShort": "12345",
+        "productNameBold": "Pinot",
+        "country": "Italien",
+        "categoryLevel2": "Rött vin",
+        "price": 199.0,
+    }
+    out = systembolaget._parse_product(p)
+    assert out.country == "Italien"
+
+
+def test_parse_product_country_defaults_to_empty_when_missing():
+    p = {"productId": "p1", "productNameBold": "Foo", "categoryLevel2": "Vitt vin", "price": 1.0}
+    out = systembolaget._parse_product(p)
+    assert out.country == ""

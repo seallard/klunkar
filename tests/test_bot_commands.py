@@ -22,8 +22,10 @@ def fake_state(monkeypatch):
         rank_source="munskankarna",
         value_filter=None,
         wine_type_filter=None,
+        country_filter=None,
         upcoming=[],
         past=[],
+        countries=[],
     )
 
     edits: list[tuple[int, int, str]] = []
@@ -44,6 +46,11 @@ def fake_state(monkeypatch):
     monkeypatch.setattr(
         bot.db, "get_subscriber_wine_type_filter", lambda c, chat: state.wine_type_filter
     )
+    monkeypatch.setattr(
+        bot.db, "get_subscriber_country_filter", lambda c, chat: state.country_filter
+    )
+    monkeypatch.setattr(bot.db, "get_release_countries", lambda c, d: state.countries)
+    monkeypatch.setattr(bot, "_resolve_release_countries", lambda c: state.countries)
     monkeypatch.setattr(bot.db, "get_upcoming_release_dates", lambda c, since: state.upcoming)
     monkeypatch.setattr(bot.db, "get_past_release_dates_with_data", lambda c, since: state.past)
     monkeypatch.setattr(bot.db, "get_release_type_counts", lambda c, d: {})
@@ -70,6 +77,11 @@ def fake_state(monkeypatch):
         state.rank_source = str(value)
 
     monkeypatch.setattr(bot.db, "set_subscriber_rank_source", _set_rank_source)
+
+    def _set_country_filter(conn, chat, value):
+        state.country_filter = value
+
+    monkeypatch.setattr(bot.db, "set_subscriber_country_filter", _set_country_filter)
 
     return state, sent
 
@@ -706,3 +718,100 @@ def test_settings_command_is_dispatched():
 
 def test_recent_command_is_dispatched():
     assert "/recent" in bot._HANDLERS
+
+
+# ---- /country ----------------------------------------------------------
+
+
+def test_country_no_arg_shows_keyboard(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.countries = ["Frankrike", "Italien", "Spanien"]
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+    bot._handle_country(123, "/country", MagicMock())
+
+    flat_data = [
+        btn["callback_data"] for row in captured[-1].get("inline_keyboard", []) for btn in row
+    ]
+    assert "cnt:Italien" in flat_data
+    assert "cnt:Frankrike" in flat_data
+
+
+def test_country_no_arg_when_no_data(fake_state):
+    state, sent = fake_state
+    state.countries = []
+    bot._handle_country(123, "/country", MagicMock())
+    assert any("Inga land" in m for _, m in sent)
+
+
+def test_country_text_path_sets_filter(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.countries = ["Frankrike", "Italien"]
+    monkeypatch.setattr(bot, "_send_ranked", lambda *a, **kw: True)
+    monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
+
+    bot._handle_country(123, "/country italien,frankrike", MagicMock())
+
+    assert state.country_filter == ["Italien", "Frankrike"]
+
+
+def test_country_text_path_unknown_rejected(fake_state):
+    state, sent = fake_state
+    state.countries = ["Italien"]
+    bot._handle_country(123, "/country mars", MagicMock())
+    assert state.country_filter is None
+    assert any("Okänt land" in m for _, m in sent)
+
+
+def test_country_callback_toggle(fake_state):
+    state, _ = fake_state
+    state.countries = ["Italien", "Frankrike"]
+
+    bot._handle_country_callback(123, 50, "Italien", MagicMock())
+
+    assert state.country_filter == ["Italien"]
+    assert state.edits[-1][1] == 50
+
+    bot._handle_country_callback(123, 50, "Italien", MagicMock())
+    assert state.country_filter is None
+
+
+def test_country_callback_done_returns_to_list(fake_state, monkeypatch):
+    state, _ = fake_state
+    state.country_filter = ["Italien"]
+    called = {}
+
+    def fake_send_ranked(chat_id, conn, release_date, source):
+        called["args"] = (chat_id, release_date, source)
+        return True
+
+    monkeypatch.setattr(bot, "_send_ranked", fake_send_ranked)
+    monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
+
+    bot._handle_country_callback(123, 50, "done", MagicMock())
+
+    assert called["args"][0] == 123
+    assert "Italien" in state.edits[-1][2]
+
+
+def test_hub_cnt_open_then_toggle(fake_state):
+    state, _ = fake_state
+    state.countries = ["Italien", "Frankrike"]
+
+    bot._handle_hub_callback(123, 99, "cnt", MagicMock())
+    assert "Välj land" in state.edits[-1][2]
+
+    bot._handle_hub_callback(123, 99, "cnt:Italien", MagicMock())
+    assert state.country_filter == ["Italien"]
+
+
+def test_hub_clear_resets_country_filter(fake_state):
+    state, _ = fake_state
+    state.country_filter = ["Italien"]
+    bot._handle_hub_callback(123, 99, "clear", MagicMock())
+    assert state.country_filter is None
