@@ -148,7 +148,7 @@ def test_markdownv2_escapes_dots_and_parens():
     assert "Wine 4\\.5" in out
 
 
-def test_format_message_backfill_notice():
+def test_format_message_backfill_notice_names_source():
     rw = RankedWine(
         wine=_wine(name="X", price=100),
         rank_score=10,
@@ -157,7 +157,24 @@ def test_format_message_backfill_notice():
     plain = format_message([rw], RD, source="munskankarna")
     backfilled = format_message([rw], RD, source="munskankarna", is_backfill=True)
 
-    assert "Försenad publicering" not in plain
-    assert "Försenad publicering" in backfilled
+    assert "Uppdaterad lista" not in plain
+    assert "Uppdaterad lista" in backfilled
+    assert "Munskänkarna finns nu med" in backfilled
     # Notice appears before the title
-    assert backfilled.index("Försenad publicering") < backfilled.index("Tillfälligt sortiment")
+    assert backfilled.index("Uppdaterad lista") < backfilled.index("Tillfälligt sortiment")
+
+
+def test_format_message_backfill_notice_uses_vivino_label():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=4.0,
+        vivino=VivinoPayload(
+            wine_id=1,
+            matched_name="m",
+            ratings_average=4.0,
+            ratings_count=10,
+            wine_url="https://v/1",
+        ),
+    )
+    out = format_message([rw], RD, source="vivino", is_backfill=True)
+    assert "Vivino finns nu med" in out

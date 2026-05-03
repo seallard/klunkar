@@ -310,10 +310,7 @@ def format_message(
     date_str = _escape(_sv_date(release_date))
     lines: list[str] = []
     if is_backfill:
-        lines.append(
-            "📬 *Försenad publicering* — "
-            + _escape("datat för detta släpp publicerades senare än vanligt.")
-        )
+        lines.append(f"📬 *Uppdaterad lista* — {_escape(_source_label(source))} finns nu med.")
         lines.append("")
     lines.append(f"🍷 *Tillfälligt sortiment — {date_str}*")
     lines.append(_escape(f"Rankas av {_source_label(source)}"))
