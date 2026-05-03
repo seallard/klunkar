@@ -164,6 +164,7 @@ def _notify_subscribers(
     subscribers: list[Subscriber],
     *,
     log_prefix: str = "",
+    is_backfill: bool = False,
 ) -> int:
     """Send the ranked-view message to each eligible subscriber. Returns send count."""
     sent = 0
@@ -171,11 +172,13 @@ def _notify_subscribers(
         if db.has_notified_subscriber(conn, release_date, sub.chat_id):
             continue
         value_set = set(sub.value_filter) if sub.value_filter else None
+        type_set = set(sub.wine_type_filter) if sub.wine_type_filter else None
         ranked = ranking.build_ranked_view(
             conn,
             release_date,
             source=sub.rank_source,
             value_ratings=value_set,
+            wine_types=type_set,
         )
         if not ranked:
             log.info(
@@ -195,6 +198,8 @@ def _notify_subscribers(
                     source=sub.rank_source,
                     max_price=sub.max_price,
                     value_ratings=value_set,
+                    wine_types=type_set,
+                    is_backfill=is_backfill,
                 ),
             )
             db.mark_notified_subscriber(conn, release_date, sub.chat_id)
@@ -229,7 +234,9 @@ def check_and_notify(conn: psycopg.Connection) -> bool:
         eligible = db.get_subscribers_to_notify_for(conn, past_date)
         if not eligible:
             continue
-        sent = _notify_subscribers(conn, past_date, eligible, log_prefix="[backfill] ")
+        sent = _notify_subscribers(
+            conn, past_date, eligible, log_prefix="[backfill] ", is_backfill=True
+        )
         if sent:
             log.info("Retro-notified %d subscribers for %s", sent, past_date)
             notified_total += sent
@@ -293,6 +300,7 @@ def format_message(
     max_price: float | None = None,
     value_ratings: set[str] | None = None,
     wine_types: set[str] | None = None,
+    is_backfill: bool = False,
 ) -> str:
     source = Source(source)
     if max_price:
@@ -300,17 +308,24 @@ def format_message(
     wines = wines[: config.TOP_N]
 
     date_str = _escape(_sv_date(release_date))
-    header = f"🍷 *Tillfälligt sortiment — {date_str}*"
-    sub_lines = [_escape(f"Rankas av {_source_label(source)}")]
+    lines: list[str] = []
+    if is_backfill:
+        lines.append(
+            "📬 *Försenad publicering* — "
+            + _escape("datat för detta släpp publicerades senare än vanligt.")
+        )
+        lines.append("")
+    lines.append(f"🍷 *Tillfälligt sortiment — {date_str}*")
+    lines.append(_escape(f"Rankas av {_source_label(source)}"))
     if max_price:
-        sub_lines.append(_escape(f"Budget: {int(max_price)} kr"))
+        lines.append(_escape(f"Budget: {int(max_price)} kr"))
     if wine_types:
         types = ", ".join(sorted(wine_types))
-        sub_lines.append(_escape(f"Vintyp: {types}"))
+        lines.append(_escape(f"Vintyp: {types}"))
     if value_ratings:
         cats = ", ".join(sorted(value_ratings))
-        sub_lines.append(_escape(f"Kategori: {cats}"))
-    lines = [header, *sub_lines, ""]
+        lines.append(_escape(f"Kategori: {cats}"))
+    lines.append("")
 
     for w in wines:
         wine = w.wine

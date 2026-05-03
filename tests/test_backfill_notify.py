@@ -72,7 +72,7 @@ def fake_db(monkeypatch):
     calls.sent = sent_messages
 
     # Pretend ranking always returns one wine for any date the test marks "has data".
-    def fake_build(conn, d, *, source, value_ratings=None):
+    def fake_build(conn, d, *, source, value_ratings=None, wine_types=None):
         if state["wines"].get(d):
             return state["wines"][d]
         return []
@@ -153,3 +153,70 @@ def test_tomorrow_and_retro_both_fire(fake_db):
     sent_dates = {d for _, d in [(c, m.split()[-1]) for c, m in calls.sent]}
     assert str(tomorrow) in sent_dates
     assert str(past) in sent_dates
+
+
+def test_retro_send_uses_backfill_marker(fake_db, monkeypatch):
+    """Backfill path calls format_message with is_backfill=True."""
+    state, _ = fake_db
+    state["is_upcoming_tomorrow"] = False
+    past = date.today() - timedelta(3)
+    state["past_dates"] = [past]
+    state["past_eligible"][past] = [Subscriber(chat_id=42, rank_source=Source.MUNSKANKARNA)]
+    state["wines"][past] = ["wine"]
+    state["wine_count"][past] = 30
+
+    captured: list[dict] = []
+
+    def capturing_format(wines, d, **kw):
+        captured.append(kw)
+        return f"msg for {d}"
+
+    monkeypatch.setattr(release, "format_message", capturing_format)
+
+    release.check_and_notify(MagicMock())
+
+    assert captured and captured[-1].get("is_backfill") is True
+
+
+def test_tomorrow_send_does_not_use_backfill_marker(fake_db, monkeypatch):
+    """Regular pre-release sends do NOT set is_backfill."""
+    state, _ = fake_db
+    tomorrow = date.today() + timedelta(1)
+    state["subscribers"] = [Subscriber(chat_id=1, rank_source=Source.VIVINO)]
+    state["wines"][tomorrow] = ["wine"]
+    state["wine_count"][tomorrow] = 5
+
+    captured: list[dict] = []
+
+    def capturing_format(wines, d, **kw):
+        captured.append(kw)
+        return f"msg for {d}"
+
+    monkeypatch.setattr(release, "format_message", capturing_format)
+
+    release.check_and_notify(MagicMock())
+
+    assert captured and captured[-1].get("is_backfill") is False
+
+
+def test_notify_passes_wine_type_filter_to_build(fake_db, monkeypatch):
+    """Subscriber's wine_type_filter is forwarded to build_ranked_view."""
+    state, _ = fake_db
+    tomorrow = date.today() + timedelta(1)
+    state["subscribers"] = [
+        Subscriber(chat_id=1, rank_source=Source.VIVINO, wine_type_filter=["Rött vin", "Vitt vin"])
+    ]
+    state["wines"][tomorrow] = ["wine"]
+    state["wine_count"][tomorrow] = 5
+
+    captured: list[dict] = []
+
+    def capturing_build(conn, d, *, source, value_ratings=None, wine_types=None):
+        captured.append({"wine_types": wine_types})
+        return state["wines"].get(d, [])
+
+    monkeypatch.setattr(release.ranking, "build_ranked_view", capturing_build)
+
+    release.check_and_notify(MagicMock())
+
+    assert captured and captured[-1]["wine_types"] == {"Rött vin", "Vitt vin"}

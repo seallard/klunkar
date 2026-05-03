@@ -146,3 +146,18 @@ def test_markdownv2_escapes_dots_and_parens():
     out = format_message([rw], RD, source="vivino")
     assert "4\\.5" in out
     assert "Wine 4\\.5" in out
+
+
+def test_format_message_backfill_notice():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=10,
+        munskankarna=MunskankarnaPayload(score=10, review_url="https://m/1"),
+    )
+    plain = format_message([rw], RD, source="munskankarna")
+    backfilled = format_message([rw], RD, source="munskankarna", is_backfill=True)
+
+    assert "Försenad publicering" not in plain
+    assert "Försenad publicering" in backfilled
+    # Notice appears before the title
+    assert backfilled.index("Försenad publicering") < backfilled.index("Tillfälligt sortiment")
