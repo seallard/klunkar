@@ -462,6 +462,16 @@ def _handle_hub_callback(
         )
         return
 
+    if sub == "clear":
+        db.set_subscriber_budget(conn, chat_id, None)
+        db.set_subscriber_value_filter(conn, chat_id, None)
+        db.set_subscriber_wine_type_filter(conn, chat_id, None)
+        edit_message_text(
+            chat_id, message_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard()
+        )
+        log.info("hub:clear from %d", chat_id)
+        return
+
     if sub == "src":
         if not rest:  # open source picker
             current = db.get_subscriber_rank_source(conn, chat_id)
@@ -569,6 +579,14 @@ def _handle_hub_callback(
                 _budget_picker_text(current),
                 reply_markup=_budget_chips_keyboard(current),
             )
+            return
+        if rest == "custom":
+            send_message(
+                chat_id,
+                _escape(f"{_BUDGET_PROMPT_PREFIX} (t.ex. 175):"),
+                reply_markup={"force_reply": True, "selective": True},
+            )
+            log.info("hub:bud custom prompt from %d", chat_id)
             return
         if rest == "none":
             db.set_subscriber_budget(conn, chat_id, None)
@@ -682,10 +700,19 @@ def _handle_next(chat_id: int, conn: psycopg.Connection) -> None:
     log.info("/next %s from %d", upcoming[0], chat_id)
 
 
+def _old_picker_keyboard(dates: list[date]) -> dict:
+    rows = [[{"text": _sv_date(d), "callback_data": f"old:{d.isoformat()}"}] for d in dates]
+    return {"inline_keyboard": rows}
+
+
 def _handle_old(chat_id: int, text: str, conn: psycopg.Connection) -> None:
     parts = text.split()
     if len(parts) < 2:
-        send_message(chat_id, "Ange ett datum, t\\.ex\\. /old 2026\\-04\\-24\\.")
+        past = list(reversed(db.get_past_release_dates_with_data(conn, since=date.min)))
+        if not past:
+            send_message(chat_id, _escape("Inga tidigare släpp finns ännu."))
+            return
+        send_message(chat_id, "*Välj tidigare släpp*", reply_markup=_old_picker_keyboard(past))
         return
     try:
         target = date.fromisoformat(parts[1])
@@ -697,6 +724,19 @@ def _handle_old(chat_id: int, text: str, conn: psycopg.Connection) -> None:
         return
     _send_for_date(chat_id, target, conn)
     log.info("/old %s from %d", target, chat_id)
+
+
+def _handle_old_callback(
+    chat_id: int, message_id: int, payload: str, conn: psycopg.Connection
+) -> None:
+    try:
+        target = date.fromisoformat(payload)
+    except ValueError:
+        log.warning("old callback bad date: %r", payload)
+        return
+    edit_message_text(chat_id, message_id, _escape(f"✓ Visar {_sv_date(target)}"))
+    _send_for_date(chat_id, target, conn)
+    log.info("old callback %s from %d", target, chat_id)
 
 
 def _handle_recent(chat_id: int, conn: psycopg.Connection) -> None:
@@ -777,11 +817,17 @@ def _hub_keyboard() -> dict:
                 {"text": "Ändra kategori", "callback_data": "hub:cat"},
                 {"text": "Ändra budget", "callback_data": "hub:bud"},
             ],
+            [
+                {"text": "🧹 Rensa alla filter", "callback_data": "hub:clear"},
+            ],
         ]
     }
 
 
 _BUDGET_CHIPS: list[int | None] = [150, 250, 500, None]
+
+
+_BUDGET_PROMPT_PREFIX = "💰 Skriv din budget i kr"
 
 
 def _budget_chips_keyboard(current: float | None) -> dict:
@@ -803,6 +849,7 @@ def _budget_chips_keyboard(current: float | None) -> dict:
             pair = []
     if pair:
         rows.append(pair)
+    rows.append([{"text": "✏️ Annat belopp", "callback_data": "hub:bud:custom"}])
     rows.append([{"text": "↩ Tillbaka", "callback_data": "hub:open"}])
     return {"inline_keyboard": rows}
 
@@ -876,10 +923,32 @@ def _handle_update(update: dict, conn: psycopg.Connection) -> None:
     chat_id = msg.get("chat", {}).get("id")
     if not chat_id or not text:
         return
+
+    # Reply to a force_reply prompt? Route based on the prompt's text.
+    reply_to = (msg.get("reply_to_message") or {}).get("text", "")
+    if reply_to.startswith(_BUDGET_PROMPT_PREFIX):
+        _handle_custom_budget_reply(chat_id, text, conn)
+        return
+
     cmd = text.split(maxsplit=1)[0]
     handler = _HANDLERS.get(cmd)
     if handler is not None:
         handler(chat_id, text, conn)
+
+
+def _handle_custom_budget_reply(chat_id: int, text: str, conn: psycopg.Connection) -> None:
+    try:
+        amount = float(text.strip().replace(",", "."))
+    except ValueError:
+        send_message(chat_id, _escape("Ogiltigt belopp. Försök igen via /settings."))
+        return
+    if amount < 0:
+        send_message(chat_id, _escape("Belopp måste vara positivt."))
+        return
+    db.set_subscriber_budget(conn, chat_id, amount)
+    send_message(chat_id, _escape(f"Budget satt till {int(amount)} kr."))
+    send_message(chat_id, _hub_text(conn, chat_id), reply_markup=_hub_keyboard())
+    log.info("custom budget %s from %d", amount, chat_id)
 
 
 def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
@@ -904,6 +973,8 @@ def _handle_callback_query(query: dict, conn: psycopg.Connection) -> None:
             _handle_winetype_callback(chat_id, message_id, payload, conn)
         elif prefix == "hub":
             _handle_hub_callback(chat_id, message_id, payload, conn)
+        elif prefix == "old":
+            _handle_old_callback(chat_id, message_id, payload, conn)
         else:
             log.warning("Unknown callback prefix: %r", prefix)
     finally:

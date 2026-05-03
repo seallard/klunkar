@@ -439,6 +439,99 @@ def test_hub_cat_toggle_keeps_in_picker(fake_state):
     assert "Välj kategori" in state.edits[-1][2]
 
 
+def test_hub_clear_resets_all_filters(fake_state):
+    state, _ = fake_state
+    state.budget = 200.0
+    state.value_filter = ["fynd"]
+    state.wine_type_filter = ["Rött vin"]
+
+    bot._handle_hub_callback(123, 99, "clear", MagicMock())
+
+    assert state.budget is None
+    assert state.value_filter is None
+    assert state.wine_type_filter is None
+    assert "Dina inställningar" in state.edits[-1][2]
+
+
+def test_hub_bud_custom_sends_force_reply(fake_state, monkeypatch):
+    state, sent = fake_state
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+
+    bot._handle_hub_callback(123, 99, "bud:custom", MagicMock())
+
+    assert any("Skriv din budget" in m for _, m in sent)
+    assert captured[-1].get("force_reply") is True
+
+
+def test_custom_budget_reply_sets_budget(fake_state):
+    state, sent = fake_state
+
+    bot._handle_custom_budget_reply(123, "175", MagicMock())
+
+    assert state.budget == 175.0
+    assert any("Budget satt till 175 kr" in m for _, m in sent)
+
+
+def test_custom_budget_reply_invalid(fake_state):
+    state, sent = fake_state
+    bot._handle_custom_budget_reply(123, "not-a-number", MagicMock())
+    assert state.budget is None
+    assert any("Ogiltigt belopp" in m for _, m in sent)
+
+
+def test_update_routes_force_reply_to_budget(fake_state):
+    state, sent = fake_state
+    update = {
+        "message": {
+            "chat": {"id": 123},
+            "text": "175",
+            "reply_to_message": {"text": f"{bot._BUDGET_PROMPT_PREFIX} (t.ex. 175):"},
+        }
+    }
+    bot._handle_update(update, MagicMock())
+    assert state.budget == 175.0
+
+
+def test_old_no_arg_shows_keyboard(fake_state, monkeypatch):
+    state, sent = fake_state
+    state.past = [date(2026, 4, 10), date(2026, 4, 17), date(2026, 4, 24)]
+    captured: list[dict] = []
+
+    def _send(chat_id, msg, reply_markup=None):
+        sent.append((chat_id, msg))
+        captured.append(reply_markup or {})
+
+    monkeypatch.setattr(bot, "send_message", _send)
+
+    bot._handle_old(123, "/old", MagicMock())
+
+    flat = [btn["callback_data"] for row in captured[-1].get("inline_keyboard", []) for btn in row]
+    assert "old:2026-04-24" in flat
+    assert "old:2026-04-10" in flat
+
+
+def test_old_callback_loads_date(fake_state, monkeypatch):
+    state, sent = fake_state
+    called = {}
+
+    def fake_send_for_date(chat_id, target, conn):
+        called["target"] = target
+
+    monkeypatch.setattr(bot, "_send_for_date", fake_send_for_date)
+
+    bot._handle_old_callback(123, 99, "2026-04-17", MagicMock())
+
+    assert called["target"] == date(2026, 4, 17)
+    assert "✓ Visar" in state.edits[-1][2]
+    assert "17 april 2026" in state.edits[-1][2]
+
+
 def test_callback_unknown_prefix_is_no_op(fake_state):
     state, sent = fake_state
     query = {
@@ -554,10 +647,11 @@ def test_old_invalid_date(fake_state):
     assert any("Ogiltigt datum" in m for _, m in sent)
 
 
-def test_old_missing_date(fake_state):
-    _, sent = fake_state
+def test_old_missing_date_no_past_releases(fake_state):
+    state, sent = fake_state
+    state.past = []
     bot._handle_old(123, "/old", MagicMock())
-    assert any("Ange ett datum" in m for _, m in sent)
+    assert any("Inga tidigare släpp" in m for _, m in sent)
 
 
 # ---- /releases ----------------------------------------------------------
