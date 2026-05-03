@@ -1066,6 +1066,8 @@ def _hub_text(conn: psycopg.Connection, chat_id: int) -> str:
             f"*Vintyp:* {_escape(type_text)}",
             f"*Land:* {_escape(country_text)}",
             f"*Prisvärdhet:* {_escape(value_text)}",
+            "",
+            f"_{_escape('Inställningarna gäller även för notisen dagen innan varje släpp.')}_",
         ]
     )
 
