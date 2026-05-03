@@ -5,7 +5,7 @@ Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcomi
 
 One Python package, one CLI (`klunkar`), **two processes** running from the same codebase:
 
-- **`klunkar bot`** — long-running Telegram **long polling** (not webhooks). Handles `/start`, `/stop`, `/budget`, `/source`, `/category`, `/winetype`, `/country`, `/clear`, `/next`, `/recent`, `/old`, `/releases`, `/settings`, `/help`.
+- **`klunkar bot`** — long-running Telegram **long polling** (not webhooks). Handles `/start`, `/stop`, `/budget`, `/source`, `/value`, `/winetype`, `/country`, `/clear`, `/next`, `/recent`, `/old`, `/releases`, `/settings`, `/help`.
 - **`klunkar check-release`** — one-shot, run daily by cron. Prefetches all SB wines for upcoming releases, runs every enricher, fans out to subscribers (per-`(release_date, chat_id)` dedup), then **back-fills enrichment + retroactive notifications for recent past releases** within `BACKFILL_WINDOW_DAYS` (default 14). This catches Munskänkarna-ranked subscribers who were skipped pre-release because Munskänkarna's review page hadn't published yet — once it lands, the next cron tick enriches the past release and sends the message.
 
 All commands read exclusively from the DB. Only `check-release` and `enrich` make external HTTP requests.

@@ -2,7 +2,7 @@ from datetime import date
 from unittest.mock import MagicMock
 
 from klunkar import ranking
-from klunkar.bot import parse_category_args
+from klunkar.bot import parse_value_args
 from klunkar.models import MunskankarnaPayload, RankedWine, Wine
 from klunkar.release import format_message
 
@@ -22,45 +22,45 @@ def _wine(num, name="W", price=200.0):
     )
 
 
-# ---- parse_category_args -------------------------------------------------
+# ---- parse_value_args -------------------------------------------------
 
 
 def test_parse_simple():
-    assert parse_category_args("fynd") == (["fynd"], [])
+    assert parse_value_args("fynd") == (["fynd"], [])
 
 
 def test_parse_multi_csv():
-    resolved, unknown = parse_category_args("fynd,prisvärt")
+    resolved, unknown = parse_value_args("fynd,prisvärt")
     assert resolved == ["fynd", "prisvärt"]
     assert unknown == []
 
 
 def test_parse_aliases_and_dedupe():
-    resolved, unknown = parse_category_args("mer, prisv,prisvart, fynd")
+    resolved, unknown = parse_value_args("mer, prisv,prisvart, fynd")
     assert resolved == ["mer än prisvärt", "prisvärt", "fynd"]
     assert unknown == []
 
 
 def test_parse_empty_returns_empty():
-    assert parse_category_args("") == ([], [])
-    assert parse_category_args("   ") == ([], [])
+    assert parse_value_args("") == ([], [])
+    assert parse_value_args("   ") == ([], [])
 
 
 def test_parse_clear_word_is_unknown():
     """`clear` no longer special-cased; it lands in unknown like any other token."""
-    resolved, unknown = parse_category_args("clear")
+    resolved, unknown = parse_value_args("clear")
     assert resolved == []
     assert unknown == ["clear"]
 
 
 def test_parse_unknown_collected():
-    resolved, unknown = parse_category_args("fynd,nonsens,whatever")
+    resolved, unknown = parse_value_args("fynd,nonsens,whatever")
     assert resolved == ["fynd"]
     assert unknown == ["nonsens", "whatever"]
 
 
 def test_parse_case_insensitive():
-    assert parse_category_args("FYND") == (["fynd"], [])
+    assert parse_value_args("FYND") == (["fynd"], [])
 
 
 # ---- ranking with value_ratings filter -----------------------------------

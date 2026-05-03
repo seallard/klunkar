@@ -7,7 +7,7 @@ import httpx
 import typer
 
 from klunkar import config, db, ranking, release
-from klunkar.bot import parse_category_args, run as run_bot
+from klunkar.bot import parse_value_args, run as run_bot
 from klunkar.models import Source
 
 app = typer.Typer()
@@ -141,18 +141,18 @@ def refetch(
 def preview(
     release_date: Annotated[str | None, typer.Argument()] = None,
     source: Annotated[str, typer.Option("--source")] = "munskankarna",
-    category: Annotated[
-        str | None, typer.Option("--category", help='Comma-separated; e.g. "fynd,prisvärt"')
+    value: Annotated[
+        str | None, typer.Option("--value", help='Comma-separated; e.g. "fynd,prisvärt"')
     ] = None,
 ) -> None:
     """Dry run: print the ranked wine list for a release date (default: next upcoming)."""
     src = _resolve_source(source)
 
     value_set: set[str] | None = None
-    if category:
-        resolved, unknown = parse_category_args(category)
+    if value:
+        resolved, unknown = parse_value_args(value)
         if unknown:
-            typer.echo(f"Unknown category: {', '.join(unknown)}")
+            typer.echo(f"Unknown value: {', '.join(unknown)}")
             raise typer.Exit(1)
         value_set = set(resolved) if resolved else None
 
@@ -193,5 +193,5 @@ def subscribers_list() -> None:
         subs = db.get_subscribers(conn)
     for s in subs:
         cats = ",".join(s.value_filter) if s.value_filter else "-"
-        typer.echo(f"{s.chat_id}\tbudget={s.max_price}\tsource={s.rank_source}\tcategory={cats}")
+        typer.echo(f"{s.chat_id}\tbudget={s.max_price}\tsource={s.rank_source}\tvalue={cats}")
     typer.echo(f"Total: {len(subs)}")

@@ -9,16 +9,16 @@
   <img alt="python" src="https://img.shields.io/badge/python-3.11%2B-blue?style=flat-square"/>
 </p>
 
-**klunkar** is a Telegram bot that texts you the highest-rated wines from Systembolaget's upcoming *tillfälliga sortiment* releases — sent the day before each release. Each subscriber picks which source ranks their list (Munskänkarna by default, or Vivino) and can filter by budget and value category.
+**klunkar** is a Telegram bot that texts you the highest-rated wines from Systembolaget's upcoming *tillfälliga sortiment* releases — sent the day before each release. Each subscriber picks which source ranks their list (Munskänkarna by default, or Vivino) and can filter by budget, wine type, country, and Munskänkarna's *prisvärdhet* rating.
 
 ## Example
 
-A `/recent` reply by default — and the same list once a budget and Munskänkarna value-category filter are applied:
+A `/recent` reply by default — and the same list once a budget and Munskänkarna *prisvärdhet* filter are applied:
 
 <p align="center">
   <img src="docs/recent_list.png" alt="default /recent list" height="520"/>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="docs/recent_filters.png" alt="/recent with budget and category filters applied" height="520"/>
+  <img src="docs/recent_filters.png" alt="/recent with filters applied" height="520"/>
 </p>
 
 ## Commands
@@ -35,7 +35,7 @@ A `/recent` reply by default — and the same list once a budget and Munskänkar
 | `/budget 150` | Only show wines under 150 kr |
 | `/winetype rött,vitt` | Filter on wine type (*rött*, *vitt*, *rosé*, *mousserande*) |
 | `/country Italien,Frankrike` | Filter on country (only countries present in the active release) |
-| `/category fynd` | Filter on Munskänkarna prisvärdhet (e.g. *fynd*, *prisvärt*) |
+| `/value fynd` | Filter on Munskänkarna prisvärdhet (e.g. *fynd*, *prisvärt*) |
 | `/clear` | Reset all filters (source preserved) |
 | `/settings` | Show your current settings |
 | `/help` | Show the command list |

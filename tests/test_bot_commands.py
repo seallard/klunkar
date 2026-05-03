@@ -138,7 +138,7 @@ def test_budget_invalid_value(fake_state):
 # ---- /clear -------------------------------------------------------------
 
 
-def test_clear_resets_budget_and_category(fake_state, monkeypatch):
+def test_clear_resets_budget_and_value(fake_state, monkeypatch):
     state, sent = fake_state
     state.budget = 200.0
     state.value_filter = ["fynd"]
@@ -299,27 +299,27 @@ def test_source_callback_writes_db_and_edits(fake_state, monkeypatch):
     assert "Vivino" in state.edits[-1][2]
 
 
-def test_category_callback_toggle_adds_value(fake_state):
+def test_value_callback_toggle_adds(fake_state):
     state, sent = fake_state
     state.value_filter = None
 
-    bot._handle_category_callback(123, 99, "fynd", MagicMock())
+    bot._handle_value_callback(123, 99, "fynd", MagicMock())
 
     assert state.value_filter == ["fynd"]
     assert state.edits[-1][1] == 99
     assert "fynd" in state.edits[-1][2]
 
 
-def test_category_callback_toggle_removes_existing(fake_state):
+def test_value_callback_toggle_removes_existing(fake_state):
     state, sent = fake_state
     state.value_filter = ["fynd", "prisvärt"]
 
-    bot._handle_category_callback(123, 99, "fynd", MagicMock())
+    bot._handle_value_callback(123, 99, "fynd", MagicMock())
 
     assert state.value_filter == ["prisvärt"]
 
 
-def test_category_callback_done_sends_list(fake_state, monkeypatch):
+def test_value_callback_done_sends_list(fake_state, monkeypatch):
     state, sent = fake_state
     state.value_filter = ["fynd"]
     called = {}
@@ -331,7 +331,7 @@ def test_category_callback_done_sends_list(fake_state, monkeypatch):
     monkeypatch.setattr(bot, "_send_ranked", fake_send_ranked)
     monkeypatch.setattr(bot, "_resolve_active_date", lambda c: date(2026, 5, 8))
 
-    bot._handle_category_callback(123, 99, "done", MagicMock())
+    bot._handle_value_callback(123, 99, "done", MagicMock())
 
     assert called["args"][0] == 123
     # picker message edited away
@@ -391,7 +391,7 @@ def test_settings_sends_hub_keyboard(fake_state, monkeypatch):
     bot._handle_settings(456, MagicMock())
 
     flat = [btn["callback_data"] for row in captured[-1].get("inline_keyboard", []) for btn in row]
-    assert "hub:src" in flat and "hub:wt" in flat and "hub:cat" in flat and "hub:bud" in flat
+    assert "hub:src" in flat and "hub:wt" in flat and "hub:val" in flat and "hub:bud" in flat
 
 
 def test_hub_open_re_renders_hub(fake_state):
@@ -447,7 +447,7 @@ def test_hub_cat_toggle_keeps_in_picker(fake_state):
     state, _ = fake_state
     state.value_filter = ["fynd"]
 
-    bot._handle_hub_callback(123, 99, "cat:fynd", MagicMock())
+    bot._handle_hub_callback(123, 99, "val:fynd", MagicMock())
     assert state.value_filter is None  # toggled off
     assert "Välj prisvärdhet" in state.edits[-1][2]
 
