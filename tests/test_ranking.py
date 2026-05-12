@@ -2,7 +2,7 @@ from datetime import date
 from unittest.mock import MagicMock
 
 from klunkar import ranking
-from klunkar.models import Wine
+from klunkar.models import Source, Wine
 
 RD = date(2026, 4, 24)
 
@@ -105,9 +105,10 @@ def test_vinbanken_payload_populated(monkeypatch):
     rows = [(_wine("1", "A"), {"vinbanken": _vinbanken(91, fynd=True)})]
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(MagicMock(), RD, source="vinbanken")
-    assert out[0].vinbanken is not None
-    assert out[0].vinbanken.score == 91
-    assert out[0].vinbanken.fynd is True
+    vb = out[0].payloads.get(Source.VINBANKEN)
+    assert vb is not None
+    assert vb.score == 91
+    assert vb.fynd is True
 
 
 def test_vivino_bayesian_favors_more_ratings(monkeypatch):
@@ -137,8 +138,10 @@ def test_payloads_round_trip_to_models(monkeypatch):
     ]
     monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
     out = ranking.build_ranked_view(MagicMock(), RD, source="vivino")
-    assert out[0].vivino is not None and out[0].vivino.ratings_count == 50
-    assert out[0].munskankarna is not None and out[0].munskankarna.value_rating == "prisvärt"
+    vivino = out[0].payloads.get(Source.VIVINO)
+    munskankarna = out[0].payloads.get(Source.MUNSKANKARNA)
+    assert vivino is not None and vivino.ratings_count == 50
+    assert munskankarna is not None and munskankarna.value_rating == "prisvärt"
 
 
 def test_wine_types_filter_drops_other_types(monkeypatch):

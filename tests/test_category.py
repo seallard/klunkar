@@ -3,8 +3,9 @@ from unittest.mock import MagicMock
 
 from klunkar import ranking
 from klunkar.bot import parse_value_args
-from klunkar.models import MunskankarnaPayload, RankedWine, Wine
+from klunkar.models import RankedWine, Source, Wine
 from klunkar.release import format_message
+from klunkar.sources.munskankarna import MunskankarnaPayload
 
 RD = date(2026, 4, 24)
 
@@ -138,12 +139,20 @@ def test_value_ratings_none_means_no_filter(monkeypatch):
 # ---- format_message header shows the filter ------------------------------
 
 
-def test_format_message_shows_active_filter():
-    rw = RankedWine(
-        wine=_wine("1", "X"),
-        rank_score=15,
-        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd", review_url="https://m/1"),
+def _msk_ranked(wine, score, value, url="https://m/1"):
+    return RankedWine(
+        wine=wine,
+        rank_score=score,
+        payloads={
+            Source.MUNSKANKARNA: MunskankarnaPayload(
+                score=score, value_rating=value, review_url=url
+            ),
+        },
     )
+
+
+def test_format_message_shows_active_filter():
+    rw = _msk_ranked(_wine("1", "X"), 15, "fynd")
     out = format_message(
         [rw],
         RD,
@@ -154,10 +163,6 @@ def test_format_message_shows_active_filter():
 
 
 def test_format_message_omits_filter_when_none():
-    rw = RankedWine(
-        wine=_wine("1", "X"),
-        rank_score=15,
-        munskankarna=MunskankarnaPayload(score=15, value_rating="fynd", review_url="https://m/1"),
-    )
+    rw = _msk_ranked(_wine("1", "X"), 15, "fynd")
     out = format_message([rw], RD, source="munskankarna")
     assert "Prisvärdhet" not in out

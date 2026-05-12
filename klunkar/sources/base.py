@@ -1,11 +1,11 @@
 from datetime import date
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar
 
 import httpx
 import psycopg
 from pydantic import BaseModel, ConfigDict
 
-from klunkar.models import Source, Wine
+from klunkar.models import BaseSourcePayload, Source, Wine
 
 
 class EnrichmentResult(BaseModel):
@@ -16,10 +16,12 @@ class EnrichmentResult(BaseModel):
     payload: dict[str, Any]
 
 
-@runtime_checkable
-class Enricher(Protocol):
-    name: Source
-    display_name: str
+class Enricher:
+    """Base class for review sources. Subclass and implement the abstract bits."""
+
+    name: ClassVar[Source]
+    display_name: ClassVar[str]
+    payload_model: ClassVar[type[BaseSourcePayload]]
 
     def enrich_release(
         self,
@@ -27,4 +29,26 @@ class Enricher(Protocol):
         wines: list[Wine],
         client: httpx.Client,
         conn: psycopg.Connection,
-    ) -> list[EnrichmentResult]: ...
+    ) -> list[EnrichmentResult]:
+        raise NotImplementedError
+
+    def prepare_context(self, rows: list[tuple[Wine, dict[str, dict[str, Any]]]]) -> Any:
+        """Compute release-level ranking context (e.g. Vivino's global mean).
+
+        Default returns None — sources that don't need cross-wine context
+        leave this alone.
+        """
+        return None
+
+    def score(
+        self,
+        payload: BaseSourcePayload,
+        wine: Wine,
+        ctx: Any,
+    ) -> tuple[float, tuple[Any, ...]]:
+        """Return (rank_score, tiebreak_key) for this wine's payload."""
+        raise NotImplementedError
+
+    def render_row(self, payload: BaseSourcePayload) -> str:
+        """Return one MarkdownV2-escaped row for format_message output."""
+        raise NotImplementedError

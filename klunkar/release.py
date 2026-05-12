@@ -1,11 +1,11 @@
 import logging
-import re
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import psycopg
 
 from klunkar import config, db, ranking, systembolaget
+from klunkar.markdown import escape as _escape
 from klunkar.models import RankedWine, Source, Subscriber, Wine
 from klunkar.sources import ENRICHERS
 from klunkar.telegram import send_message
@@ -255,7 +255,6 @@ def check_and_notify(conn: psycopg.Connection) -> bool:
 
 # ---- Message formatting -------------------------------------------------
 
-_MDV2_SPECIAL = re.compile(r"([_*\[\]()~`>#+\-=|{}.!\\])")
 
 _MONTHS_SV = [
     "januari",
@@ -283,10 +282,6 @@ _WINE_GLASS = {
     "Vermouth": "🍸",
 }
 _DEFAULT_GLASS = "🍷"
-
-
-def _escape(text: str) -> str:
-    return _MDV2_SPECIAL.sub(r"\\\1", text)
 
 
 def _sv_date(d: date) -> str:
@@ -372,25 +367,11 @@ def format_message(
         sb_label = _escape(f"Systembolaget: {price_text}")
         lines.append(f"[{sb_label}]({wine.sb_url})")
 
-        if w.vivino:
-            label = _escape(f"Vivino: {w.vivino.ratings_average:.1f} ★")
-            lines.append(f"[{label}]({w.vivino.wine_url})")
-
-        if w.munskankarna:
-            chunk = f"Munskänkarna: {w.munskankarna.score:g}/20"
-            if w.munskankarna.value_rating:
-                chunk += f" ({w.munskankarna.value_rating})"
-            label = _escape(chunk)
-            url = w.munskankarna.review_url
-            lines.append(f"[{label}]({url})" if url else label)
-
-        if w.vinbanken:
-            chunk = f"Vinbanken: {w.vinbanken.score}/100"
-            if w.vinbanken.fynd:
-                chunk += " (fynd)"
-            label = _escape(chunk)
-            url = w.vinbanken.review_url
-            lines.append(f"[{label}]({url})" if url else label)
+        for src, payload in w.payloads.items():
+            enricher = ENRICHERS.get(src)
+            if enricher is None:
+                continue
+            lines.append(enricher.render_row(payload))
 
         lines.append("")
 

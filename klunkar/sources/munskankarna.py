@@ -1,16 +1,33 @@
 import logging
 import re
 from datetime import date
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 import psycopg
 from bs4 import BeautifulSoup
 
-from klunkar.models import MunskankarnaPayload, Source, Wine
-from klunkar.sources.base import EnrichmentResult
+from klunkar.markdown import escape
+from klunkar.models import BaseSourcePayload, Source, Wine
+from klunkar.sources.base import Enricher, EnrichmentResult
 
 log = logging.getLogger(__name__)
+
+
+class MunskankarnaPayload(BaseSourcePayload):
+    score: float
+    value_rating: str | None = None
+    tasting_note: str | None = None
+    review_url: str | None = None
+
+
+_VALUE_RATING_ORDER = {
+    "fynd": 3,
+    "mer än prisvärt": 2,
+    "prisvärt": 1,
+    "ej prisvärt": 0,
+}
 
 _BASE = "https://www.munskankarna.se"
 _RELEASE_URL = _BASE + "/sv/vinlocus/tillfalligt-sortiment-{slug}"
@@ -92,9 +109,10 @@ def _parse(html: str, page_url: str) -> dict[str, MunskankarnaPayload]:
     return out
 
 
-class MunskankarnaEnricher:
+class MunskankarnaEnricher(Enricher):
     name = Source.MUNSKANKARNA
     display_name = "Munskänkarna"
+    payload_model = MunskankarnaPayload
 
     def enrich_release(
         self,
@@ -142,3 +160,20 @@ class MunskankarnaEnricher:
                 )
             )
         return results
+
+    def score(
+        self,
+        payload: MunskankarnaPayload,
+        wine: Wine,
+        ctx: Any,
+    ) -> tuple[float, tuple[Any, ...]]:
+        value_rank = _VALUE_RATING_ORDER.get(payload.value_rating or "", -1)
+        tiebreak = (-value_rank, wine.price or 0.0)
+        return float(payload.score), tiebreak
+
+    def render_row(self, payload: MunskankarnaPayload) -> str:
+        chunk = f"Munskänkarna: {payload.score:g}/20"
+        if payload.value_rating:
+            chunk += f" ({payload.value_rating})"
+        label = escape(chunk)
+        return f"[{label}]({payload.review_url})" if payload.review_url else label

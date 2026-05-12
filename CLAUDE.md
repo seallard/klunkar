@@ -14,7 +14,15 @@ All commands read exclusively from the DB. Only `check-release` and `enrich` mak
 
 The Systembolaget product list is the **spine**. Every release wine is persisted independent of any external lookup. **Enrichers** (one per data source) attach per-source payloads (Vivino score, Munskänkarna review, …) to wines via the `wine_enrichments` table, keyed by `(release_date, sb_product_number, source)` with JSONB payloads.
 
-Ranking is a **query-time projection** keyed on a single source per query — no score merging across sources. Each subscriber stores their preferred `rank_source`. To add a new source: drop a file in `klunkar/sources/` and add it to the `ENRICHERS` registry in `klunkar/sources/__init__.py`.
+Ranking is a **query-time projection** keyed on a single source per query — no score merging across sources. Each subscriber stores their preferred `rank_source`.
+
+Per-source logic — payload schema, scraping, scoring, Telegram-row rendering — lives entirely in `klunkar/sources/<name>.py`. Adding a source is:
+
+1. New file `klunkar/sources/<name>.py` containing a `<Name>Payload(BaseSourcePayload)` and `<Name>Enricher(Enricher)` (with `enrich_release`, `score`, `render_row`; optionally `prepare_context` for release-level context like Vivino's global mean).
+2. One line added to the `Source` StrEnum in `models.py`.
+3. One line added to the `ENRICHERS` tuple in `klunkar/sources/__init__.py`.
+
+`ranking.py` and `release.py` are source-agnostic dispatchers — they iterate `ENRICHERS` and never branch on `Source`. The `value_filter` feature on subscribers is the one exception (intentionally Munskänkarna-specific).
 
 ## Project Structure
 
@@ -22,9 +30,10 @@ Ranking is a **query-time projection** keyed on a single source per query — no
 klunkar/
   cli.py             # typer entrypoints (migrate, check-release, enrich, preview, bot, subscribers)
   config.py          # env-based settings (incl. ENRICHMENT_REFRESH_HOURS)
-  models.py          # pydantic: Wine, RankedWine, source payloads
+  models.py          # pydantic: Wine, RankedWine, Source, BaseSourcePayload
+  markdown.py        # MarkdownV2 escape helper (shared by release.py + enrichers)
   db.py              # Postgres schema + helpers (wines, wine_enrichments, enrichment_runs, …)
-  ranking.py         # per-source build_ranked_view (Bayesian for vivino, raw for munskankarna)
+  ranking.py         # source-agnostic build_ranked_view; dispatches through ENRICHERS
   systembolaget.py   # release calendar + product fetch (the spine)
   vivino.py          # legacy Vivino client (lookup, slugify) — used by sources/vivino.py
   telegram.py        # low-level bot client
@@ -32,10 +41,10 @@ klunkar/
   release.py         # prefetch_upcoming, check_and_notify, format_message
   sources/
     __init__.py      # ENRICHERS registry
-    base.py          # Enricher Protocol + EnrichmentResult
-    vivino.py        # VivinoEnricher
-    munskankarna.py  # MunskankarnaEnricher (HTML scrape of vinlocus release page)
-    vinbanken.py     # VinbankenEnricher (hub scrape → per-release-per-type article pages)
+    base.py          # Enricher base class + EnrichmentResult
+    vivino.py        # VivinoPayload + VivinoEnricher (Bayesian-smoothed ranking)
+    munskankarna.py  # MunskankarnaPayload + MunskankarnaEnricher (HTML scrape of vinlocus release page)
+    vinbanken.py     # VinbankenPayload + VinbankenEnricher (hub scrape → per-release-per-type article pages)
 tests/               # pytest; no DB integration (pure-function tests only)
 ```
 

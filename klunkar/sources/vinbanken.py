@@ -1,16 +1,26 @@
 import logging
 import re
 from datetime import date
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 import psycopg
 from bs4 import BeautifulSoup, Tag
 
-from klunkar.models import Source, VinbankenPayload, Wine
-from klunkar.sources.base import EnrichmentResult
+from klunkar.markdown import escape
+from klunkar.models import BaseSourcePayload, Source, Wine
+from klunkar.sources.base import Enricher, EnrichmentResult
 
 log = logging.getLogger(__name__)
+
+
+class VinbankenPayload(BaseSourcePayload):
+    score: int
+    fynd: bool = False
+    tasting_note: str | None = None
+    review_url: str | None = None
+
 
 _BASE = "https://vinbanken.se"
 _HUB_URL = _BASE + "/kategorier/nyheter-systembolaget/tillfalligt-sortiment-systembolaget"
@@ -109,9 +119,10 @@ def _parse_article(html: str, page_url: str) -> dict[str, VinbankenPayload]:
     return out
 
 
-class VinbankenEnricher:
+class VinbankenEnricher(Enricher):
     name = Source.VINBANKEN
     display_name = "Vinbanken"
+    payload_model = VinbankenPayload
 
     def enrich_release(
         self,
@@ -172,3 +183,19 @@ class VinbankenEnricher:
                 )
             )
         return results
+
+    def score(
+        self,
+        payload: VinbankenPayload,
+        wine: Wine,
+        ctx: Any,
+    ) -> tuple[float, tuple[Any, ...]]:
+        tiebreak = (-int(payload.fynd), wine.price or 0.0)
+        return float(payload.score), tiebreak
+
+    def render_row(self, payload: VinbankenPayload) -> str:
+        chunk = f"Vinbanken: {payload.score}/100"
+        if payload.fynd:
+            chunk += " (fynd)"
+        label = escape(chunk)
+        return f"[{label}]({payload.review_url})" if payload.review_url else label

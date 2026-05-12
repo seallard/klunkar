@@ -1,19 +1,35 @@
 import logging
 from datetime import date
+from typing import Any
 
 import httpx
 import psycopg
 
+from klunkar import config
 from klunkar import vivino as _v
-from klunkar.models import Source, VivinoPayload, Wine
-from klunkar.sources.base import EnrichmentResult
+from klunkar.markdown import escape
+from klunkar.models import BaseSourcePayload, Source, Wine
+from klunkar.sources.base import Enricher, EnrichmentResult
 
 log = logging.getLogger(__name__)
 
 
-class VivinoEnricher:
+class VivinoPayload(BaseSourcePayload):
+    wine_id: int
+    matched_name: str
+    ratings_average: float
+    ratings_count: int
+    wine_url: str
+
+
+def _bayesian(r: float, v: int, c: float, m: int) -> float:
+    return (v / (v + m)) * r + (m / (v + m)) * c
+
+
+class VivinoEnricher(Enricher):
     name = Source.VIVINO
     display_name = "Vivino"
+    payload_model = VivinoPayload
 
     def enrich_release(
         self,
@@ -44,3 +60,30 @@ class VivinoEnricher:
                 )
             )
         return results
+
+    def prepare_context(self, rows: list[tuple[Wine, dict[str, dict[str, Any]]]]) -> float:
+        ratings = [
+            p[Source.VIVINO]["ratings_average"]
+            for _, p in rows
+            if Source.VIVINO in p and "ratings_average" in p[Source.VIVINO]
+        ]
+        return sum(ratings) / len(ratings) if ratings else 0.0
+
+    def score(
+        self,
+        payload: VivinoPayload,
+        wine: Wine,
+        ctx: float,
+    ) -> tuple[float, tuple[Any, ...]]:
+        rank = _bayesian(
+            payload.ratings_average,
+            payload.ratings_count,
+            ctx,
+            config.VIVINO_RATING_PRIOR,
+        )
+        tiebreak = (-payload.ratings_count, wine.price or 0.0)
+        return rank, tiebreak
+
+    def render_row(self, payload: VivinoPayload) -> str:
+        label = escape(f"Vivino: {payload.ratings_average:.1f} ★")
+        return f"[{label}]({payload.wine_url})"

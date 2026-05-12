@@ -1,13 +1,17 @@
 from datetime import date
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Source(StrEnum):
     VIVINO = "vivino"
     MUNSKANKARNA = "munskankarna"
     VINBANKEN = "vinbanken"
+
+
+class BaseSourcePayload(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
 
 class Wine(BaseModel):
@@ -24,42 +28,12 @@ class Wine(BaseModel):
     country: str | None = None
 
 
-class VivinoPayload(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    wine_id: int
-    matched_name: str
-    ratings_average: float
-    ratings_count: int
-    wine_url: str
-
-
-class MunskankarnaPayload(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    score: float
-    value_rating: str | None = None
-    tasting_note: str | None = None
-    review_url: str | None = None
-
-
-class VinbankenPayload(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    score: int
-    fynd: bool = False
-    tasting_note: str | None = None
-    review_url: str | None = None
-
-
 class RankedWine(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     wine: Wine
     rank_score: float
-    vivino: VivinoPayload | None = None
-    munskankarna: MunskankarnaPayload | None = None
-    vinbanken: VinbankenPayload | None = None
+    payloads: dict[Source, BaseSourcePayload] = Field(default_factory=dict)
 
 
 class Subscriber(BaseModel):
