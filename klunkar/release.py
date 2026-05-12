@@ -384,6 +384,14 @@ def format_message(
             url = w.munskankarna.review_url
             lines.append(f"[{label}]({url})" if url else label)
 
+        if w.vinbanken:
+            chunk = f"Vinbanken: {w.vinbanken.score}/100"
+            if w.vinbanken.fynd:
+                chunk += " (fynd)"
+            label = _escape(chunk)
+            url = w.vinbanken.review_url
+            lines.append(f"[{label}]({url})" if url else label)
+
         lines.append("")
 
     return "\n".join(lines)

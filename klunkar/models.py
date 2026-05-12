@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 class Source(StrEnum):
     VIVINO = "vivino"
     MUNSKANKARNA = "munskankarna"
+    VINBANKEN = "vinbanken"
 
 
 class Wine(BaseModel):
@@ -42,6 +43,15 @@ class MunskankarnaPayload(BaseModel):
     review_url: str | None = None
 
 
+class VinbankenPayload(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    score: int
+    fynd: bool = False
+    tasting_note: str | None = None
+    review_url: str | None = None
+
+
 class RankedWine(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -49,6 +59,7 @@ class RankedWine(BaseModel):
     rank_score: float
     vivino: VivinoPayload | None = None
     munskankarna: MunskankarnaPayload | None = None
+    vinbanken: VinbankenPayload | None = None
 
 
 class Subscriber(BaseModel):

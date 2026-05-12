@@ -34,6 +34,10 @@ def _munskankarna(score, value=None):
     return {"score": score, "value_rating": value, "tasting_note": "n", "review_url": "https://m/1"}
 
 
+def _vinbanken(score, fynd=False):
+    return {"score": score, "fynd": fynd, "tasting_note": "n", "review_url": "https://vb/1"}
+
+
 def _conn_with(rows):
     """rows = [(Wine, {source: payload})]; mocks db.get_wines_with_enrichments via patch."""
     conn = MagicMock()
@@ -72,6 +76,38 @@ def test_munskankarna_tiebreak_value_then_price(monkeypatch):
     out = ranking.build_ranked_view(MagicMock(), RD, source="munskankarna")
     # fynd > prisvärt, then lower price wins
     assert [r.wine.sb_product_number for r in out] == ["b", "c", "a"]
+
+
+def test_vinbanken_orders_by_score(monkeypatch):
+    rows = [
+        (_wine("1", "A"), {"vinbanken": _vinbanken(88)}),
+        (_wine("2", "B"), {"vinbanken": _vinbanken(95)}),
+        (_wine("3", "C"), {"vinbanken": _vinbanken(92)}),
+    ]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(MagicMock(), RD, source="vinbanken")
+    assert [r.wine.sb_product_number for r in out] == ["2", "3", "1"]
+
+
+def test_vinbanken_tiebreak_fynd_then_price(monkeypatch):
+    rows = [
+        (_wine("a", "A", price=300), {"vinbanken": _vinbanken(90, fynd=False)}),
+        (_wine("b", "B", price=500), {"vinbanken": _vinbanken(90, fynd=True)}),
+        (_wine("c", "C", price=100), {"vinbanken": _vinbanken(90, fynd=True)}),
+    ]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(MagicMock(), RD, source="vinbanken")
+    # Fynd wins ties; among fynds, cheaper wins.
+    assert [r.wine.sb_product_number for r in out] == ["c", "b", "a"]
+
+
+def test_vinbanken_payload_populated(monkeypatch):
+    rows = [(_wine("1", "A"), {"vinbanken": _vinbanken(91, fynd=True)})]
+    monkeypatch.setattr(ranking.db, "get_wines_with_enrichments", lambda c, d: rows)
+    out = ranking.build_ranked_view(MagicMock(), RD, source="vinbanken")
+    assert out[0].vinbanken is not None
+    assert out[0].vinbanken.score == 91
+    assert out[0].vinbanken.fynd is True
 
 
 def test_vivino_bayesian_favors_more_ratings(monkeypatch):

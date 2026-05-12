@@ -1,7 +1,7 @@
 # klunkar
 
 ## Project Summary
-Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcoming *tillfälliga sortiment* release. Each subscriber picks which source ranks their list — currently Munskänkarna (default) or Vivino — sent the day before each release (and again when a late-publishing source like Munskänkarna lands).
+Telegram bot that texts subscribers the top 10 wines from Systembolaget's upcoming *tillfälliga sortiment* release. Each subscriber picks which source ranks their list — currently Munskänkarna (default), Vivino, or Vinbanken — sent the day before each release (and again when a late-publishing source like Munskänkarna lands).
 
 One Python package, one CLI (`klunkar`), **two processes** running from the same codebase:
 
@@ -35,6 +35,7 @@ klunkar/
     base.py          # Enricher Protocol + EnrichmentResult
     vivino.py        # VivinoEnricher
     munskankarna.py  # MunskankarnaEnricher (HTML scrape of vinlocus release page)
+    vinbanken.py     # VinbankenEnricher (hub scrape → per-release-per-type article pages)
 tests/               # pytest; no DB integration (pure-function tests only)
 ```
 

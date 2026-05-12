@@ -1,6 +1,6 @@
 from datetime import date
 
-from klunkar.models import MunskankarnaPayload, RankedWine, VivinoPayload, Wine
+from klunkar.models import MunskankarnaPayload, RankedWine, VinbankenPayload, VivinoPayload, Wine
 from klunkar.release import format_message
 
 RD = date(2026, 4, 24)
@@ -89,6 +89,47 @@ def test_missing_source_skips_its_row():
     out = format_message([rw], RD, source="vivino")
     assert "Vivino" in out
     assert "Munskänkarna:" not in out
+
+
+def test_vinbanken_row_renders_score_and_url():
+    rw = RankedWine(
+        wine=_wine(),
+        rank_score=92,
+        vinbanken=VinbankenPayload(score=92, review_url="https://vb/1"),
+    )
+    out = format_message([rw], RD, source="vinbanken")
+    assert "[Vinbanken: 92/100](https://vb/1)" in out
+
+
+def test_vinbanken_row_renders_fynd_badge():
+    rw = RankedWine(
+        wine=_wine(),
+        rank_score=90,
+        vinbanken=VinbankenPayload(score=90, fynd=True, review_url="https://vb/1"),
+    )
+    out = format_message([rw], RD, source="vinbanken")
+    assert "[Vinbanken: 90/100 \\(fynd\\)](https://vb/1)" in out
+
+
+def test_vinbanken_without_review_url_renders_plain_text():
+    rw = RankedWine(
+        wine=_wine(),
+        rank_score=88,
+        vinbanken=VinbankenPayload(score=88, review_url=None),
+    )
+    out = format_message([rw], RD, source="vinbanken")
+    assert "Vinbanken: 88/100" in out
+    assert "[Vinbanken" not in out
+
+
+def test_format_message_backfill_notice_uses_vinbanken_label():
+    rw = RankedWine(
+        wine=_wine(name="X", price=100),
+        rank_score=92,
+        vinbanken=VinbankenPayload(score=92, review_url="https://vb/1"),
+    )
+    out = format_message([rw], RD, source="vinbanken", is_backfill=True)
+    assert "Vinbanken finns nu med" in out
 
 
 def test_munskankarna_without_review_url_renders_plain_text():

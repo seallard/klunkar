@@ -1,0 +1,174 @@
+import logging
+import re
+from datetime import date
+from urllib.parse import urljoin
+
+import httpx
+import psycopg
+from bs4 import BeautifulSoup, Tag
+
+from klunkar.models import Source, VinbankenPayload, Wine
+from klunkar.sources.base import EnrichmentResult
+
+log = logging.getLogger(__name__)
+
+_BASE = "https://vinbanken.se"
+_HUB_URL = _BASE + "/kategorier/nyheter-systembolaget/tillfalligt-sortiment-systembolaget"
+
+_MONTHS_SV = [
+    "januari",
+    "februari",
+    "mars",
+    "april",
+    "maj",
+    "juni",
+    "juli",
+    "augusti",
+    "september",
+    "oktober",
+    "november",
+    "december",
+]
+
+_SB_NUMBER_RE = re.compile(r"#(\d{4,7})")
+_SCORE_TOOLTIP_RE = re.compile(r"^(\d{1,3})/\d+$")
+_FYND_RE = re.compile(r"^Fynd\s+\d{4}$", re.IGNORECASE)
+_ARTICLE_ID_RE = re.compile(r"-(\d+)$")
+
+
+def _date_needle(d: date) -> str:
+    return f"-{d.day}-{_MONTHS_SV[d.month - 1]}-"
+
+
+def _discover_article_urls(html: str, release_date: date) -> list[str]:
+    needle = _date_needle(release_date)
+    soup = BeautifulSoup(html, "html.parser")
+    seen: set[str] = set()
+    out: list[str] = []
+    for a in soup.select("a[href]"):
+        href = a.get("href", "")
+        if "/artiklar/" not in href:
+            continue
+        if "tillfalligt-sortiment" not in href:
+            continue
+        if needle not in href:
+            continue
+        if not _ARTICLE_ID_RE.search(href):
+            continue
+        full = urljoin(_HUB_URL, href)
+        if full in seen:
+            continue
+        seen.add(full)
+        out.append(full)
+    return out
+
+
+def _parse_card(card: Tag) -> VinbankenPayload | None:
+    meta = card.select_one(".meta")
+    sb_match = _SB_NUMBER_RE.search(meta.get_text(" ", strip=True)) if meta else None
+    if not sb_match:
+        return None
+
+    score: int | None = None
+    for el in card.select("[data-tooltip]"):
+        m = _SCORE_TOOLTIP_RE.match(el.get("data-tooltip", "").strip())
+        if m:
+            score = int(m.group(1))
+            break
+    if score is None:
+        return None
+
+    fynd = any(
+        _FYND_RE.match(el.get("data-tooltip", "").strip()) for el in card.select("[data-tooltip]")
+    )
+
+    note_el = card.select_one(".prose-sm p")
+    tasting_note = note_el.get_text(" ", strip=True) if note_el else None
+
+    return VinbankenPayload(
+        score=score,
+        fynd=fynd,
+        tasting_note=tasting_note,
+    )
+
+
+def _parse_article(html: str, page_url: str) -> dict[str, VinbankenPayload]:
+    soup = BeautifulSoup(html, "html.parser")
+    out: dict[str, VinbankenPayload] = {}
+    for card in soup.select("article.rounded-card"):
+        meta = card.select_one(".meta")
+        if not meta:
+            continue
+        sb_match = _SB_NUMBER_RE.search(meta.get_text(" ", strip=True))
+        if not sb_match:
+            continue
+        payload = _parse_card(card)
+        if payload is None:
+            continue
+        out[sb_match.group(1)] = payload.model_copy(update={"review_url": page_url})
+    return out
+
+
+class VinbankenEnricher:
+    name = Source.VINBANKEN
+    display_name = "Vinbanken"
+
+    def enrich_release(
+        self,
+        release_date: date,
+        wines: list[Wine],
+        client: httpx.Client,
+        conn: psycopg.Connection,
+    ) -> list[EnrichmentResult]:
+        try:
+            hub = client.get(_HUB_URL, follow_redirects=True, timeout=20)
+        except httpx.RequestError as e:
+            log.warning("Vinbanken hub fetch failed: %s", e)
+            return []
+        if hub.status_code != 200:
+            log.warning("Vinbanken hub returned %d", hub.status_code)
+            return []
+
+        article_urls = _discover_article_urls(hub.text, release_date)
+        if not article_urls:
+            log.info("Vinbanken: no articles found for %s on hub", release_date)
+            return []
+
+        merged: dict[str, VinbankenPayload] = {}
+        for url in article_urls:
+            try:
+                r = client.get(url, follow_redirects=True, timeout=20)
+            except httpx.RequestError as e:
+                log.warning("Vinbanken article fetch failed for %s: %s", url, e)
+                continue
+            if r.status_code != 200:
+                log.warning("Vinbanken article %s returned %d", url, r.status_code)
+                continue
+            try:
+                parsed = _parse_article(r.text, url)
+            except Exception:
+                log.exception("Vinbanken parse failed for %s; excerpt=%r", url, r.text[:200])
+                continue
+            merged.update(parsed)
+
+        log.info(
+            "Vinbanken parsed %d wines across %d article(s) for %s; matching against %d SB wines",
+            len(merged),
+            len(article_urls),
+            release_date,
+            len(wines),
+        )
+
+        results: list[EnrichmentResult] = []
+        for w in wines:
+            payload = merged.get(w.sb_product_number)
+            if payload is None:
+                continue
+            results.append(
+                EnrichmentResult(
+                    sb_product_number=w.sb_product_number,
+                    confidence=1.0,
+                    payload=payload.model_dump(),
+                )
+            )
+        return results

@@ -8,6 +8,7 @@ from klunkar.models import (
     MunskankarnaPayload,
     RankedWine,
     Source,
+    VinbankenPayload,
     VivinoPayload,
     Wine,
 )
@@ -54,6 +55,10 @@ def _score_for(
         score = float(payload["score"])
         value_rank = _VALUE_RATING_ORDER.get(payload.get("value_rating") or "", -1)
         tiebreak = (-value_rank, wine.price or 0.0)
+        return score, tiebreak
+    if source is Source.VINBANKEN:
+        score = float(payload["score"])
+        tiebreak = (-int(bool(payload.get("fynd"))), wine.price or 0.0)
         return score, tiebreak
     raise ValueError(f"unknown source: {source}")
 
@@ -105,6 +110,11 @@ def build_ranked_view(
                     munskankarna=(
                         MunskankarnaPayload(**payloads[Source.MUNSKANKARNA])
                         if Source.MUNSKANKARNA in payloads
+                        else None
+                    ),
+                    vinbanken=(
+                        VinbankenPayload(**payloads[Source.VINBANKEN])
+                        if Source.VINBANKEN in payloads
                         else None
                     ),
                 ),
