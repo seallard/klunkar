@@ -45,8 +45,7 @@ def test_parse_red_article_extracts_known_wine():
     assert p.score == 90
     assert p.fynd is True
     assert p.tasting_note and "violer" in p.tasting_note
-    # Per-wine anchor: text fragment matches the SB-number marker on the page
-    assert p.review_url == f"{RED_URL}#:~:text=%2390378"
+    assert p.review_url == RED_URL
 
 
 def test_parse_red_article_full_release():

@@ -102,16 +102,6 @@ def _parse_card(card: Tag) -> VinbankenPayload | None:
     )
 
 
-def _wine_anchor_url(page_url: str, sb_number: str) -> str:
-    """Browser text-fragment URL that scrolls to the wine's SB-number text.
-
-    `#:~:text=` is a standard browser feature (supported in current
-    Chrome/Safari/Firefox); the `#` in `#90378` is URL-encoded as `%23`
-    so it doesn't terminate the fragment.
-    """
-    return f"{page_url}#:~:text=%23{sb_number}"
-
-
 def _parse_article(html: str, page_url: str) -> dict[str, VinbankenPayload]:
     soup = BeautifulSoup(html, "html.parser")
     out: dict[str, VinbankenPayload] = {}
@@ -125,10 +115,7 @@ def _parse_article(html: str, page_url: str) -> dict[str, VinbankenPayload]:
         payload = _parse_card(card)
         if payload is None:
             continue
-        sb_number = sb_match.group(1)
-        out[sb_number] = payload.model_copy(
-            update={"review_url": _wine_anchor_url(page_url, sb_number)}
-        )
+        out[sb_match.group(1)] = payload.model_copy(update={"review_url": page_url})
     return out
 
 
