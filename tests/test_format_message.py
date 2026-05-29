@@ -204,6 +204,8 @@ def test_format_message_backfill_notice_names_source():
     assert "Uppdaterad lista" not in plain
     assert "Uppdaterad lista" in backfilled
     assert "Munskänkarna finns nu med" in backfilled
+    # MarkdownV2 requires '.' to be escaped or Telegram rejects the message.
+    assert "finns nu med\\." in backfilled
     assert backfilled.index("Uppdaterad lista") < backfilled.index("Tillfälligt sortiment")
 
 

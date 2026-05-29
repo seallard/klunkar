@@ -338,7 +338,7 @@ def format_message(
     date_str = _escape(_sv_date(release_date))
     lines: list[str] = []
     if is_backfill:
-        lines.append(f"📬 *Uppdaterad lista* — {_escape(_source_label(source))} finns nu med.")
+        lines.append(f"📬 *Uppdaterad lista* — {_escape(f'{_source_label(source)} finns nu med.')}")
         lines.append("")
     lines.append(f"🍷 *Tillfälligt sortiment — {date_str}*")
     if type_counts:
