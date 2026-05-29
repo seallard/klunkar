@@ -34,6 +34,19 @@ def test_parse_known_wine():
     )
 
 
+def test_parse_strips_argang_suffix_from_7_digit_links():
+    html = """
+    <li class="groupedlist">
+      <div class="c-wine-info__headings"><h3><a href="/sv/vinlocus/x/123">A</a></h3></div>
+      <span class="wine-points">17</span>
+      <a href="https://systembolaget.se/3157401">SB</a>
+    </li>
+    """
+    parsed = _parse(html, "https://www.munskankarna.se/sv/vinlocus/x")
+    assert "31574" in parsed
+    assert "3157401" not in parsed
+
+
 def test_parse_extracts_full_release():
     html = FIXTURE.read_text(encoding="utf-8")
     parsed = _parse(

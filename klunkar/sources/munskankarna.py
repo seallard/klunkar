@@ -79,6 +79,8 @@ def _parse(html: str, page_url: str) -> dict[str, MunskankarnaPayload]:
         if not m:
             continue
         sb_number = m.group(1)
+        if len(sb_number) == 7:
+            sb_number = sb_number[:5]
 
         score_el = li.select_one(".wine-points")
         score = _parse_score(score_el.get_text(strip=True)) if score_el else None
