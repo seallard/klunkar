@@ -122,7 +122,13 @@ def prefetch_upcoming(conn: psycopg.Connection, client: httpx.Client) -> None:
 
     today = date.today()
     horizon = today + timedelta(days=10)
-    upcoming_dates = [d for d in all_dates if today <= d < horizon]
+    upcoming_dates = [d for d in all_dates if today <= d <= horizon]
+    # Always prefetch the soonest upcoming release, even when it sits beyond the
+    # horizon (e.g. across the summer gap), so the bot never goes blind waiting
+    # for a release to drift inside a fixed window. `all_dates` is sorted and
+    # already filtered to >= today.
+    if not upcoming_dates and all_dates:
+        upcoming_dates = [all_dates[0]]
     db.save_release_dates(conn, upcoming_dates)
 
     for release_date in upcoming_dates:

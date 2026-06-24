@@ -13,7 +13,12 @@ from klunkar.sources.base import EnrichmentResult
 
 @contextmanager
 def get_conn():
-    with psycopg.connect(config.DATABASE_URL) as conn:
+    # autocommit so each statement runs in its own transaction. Without this the
+    # long-lived bot connection holds one transaction open indefinitely, which
+    # freezes now()/CURRENT_DATE at the connection's start time — every
+    # date-relative query then silently drifts. Mutations in this module wrap
+    # themselves in `conn.transaction()`, which issues a real BEGIN/COMMIT here.
+    with psycopg.connect(config.DATABASE_URL, autocommit=True) as conn:
         yield conn
 
 
